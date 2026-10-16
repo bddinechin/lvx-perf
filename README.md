@@ -65,6 +65,20 @@ startup dominates the whole-program figure at `MINI` and would halve any real
 improvement before it showed. MiBench has no such bracketing and reports whole
 program `cycles` only.
 
+### PolyBench carries the evidence for a compiler default in `lvx-csw`
+
+`param_vect_partial_vector_usage` is pinned to **1** in `lvx_option_override`
+in `lvx-gcc`, and the justification is a PolyBench sweep kept here: across 30
+kernels at both FP widths, usage=1 is best-or-tied on **all 60**
+kernel-width combinations, usage=0 is never better, usage=2 loses `fdtd-2d` by
+1.2%, and `durbin` at 0.9940× is the single case in that work where a masked
+epilogue actually wins.
+
+The coupling is worth stating plainly because the split hid it: the pin lives
+in one repository and its evidence in another. Anyone re-opening that default
+should re-run the sweep here rather than reason about it, and anyone changing
+these kernels should know a compiler default rests on them.
+
 ### The correctness gate is not optional
 
 A miscompile reads as a large speed-up. On this target a stale `libgcc`
@@ -76,16 +90,64 @@ them separately rather than dropping them — `noref` (upstream ships no referen
 output for that benchmark) is a real run worth watching, just not one worth
 scoring.
 
+## Locating `lvx-csw` — the one parameter
+
+**`lvx-perf` cannot be self-contained**, and this is the consequence worth
+understanding before anything else here. It measures a toolchain that is a
+*build product* of a **built** `lvx-csw` checkout: `lvx-toolchain/bin` and
+`lvx-gem5/build` are in nobody's git, so they cannot be submodules, vendored or
+pinned. `lvx-ssw` additionally compiles through `lvx-simde`, and links
+`validation/lib/crt.S` — both of which stay in `lvx-csw`.
+
+So that checkout's location is a **parameter of every harness and every tool
+here**, resolved the same way by all of them. Highest precedence first:
+
+| Mechanism | For |
+|---|---|
+| `--csw <path>` | a one-off, or a CI job measuring a specific tree |
+| `$LVX_CSW` | a shell session, or a whole sweep |
+| `./lvx-csw.path` | **per machine, set once.** One line, not committed |
+| `../lvx-csw` | the default: the two checkouts as siblings |
+| `~/lvx-csw` | last resort (tools only) |
+
+```bash
+echo /path/to/lvx-csw > lvx-csw.path    # the usual answer, once
+./bin/lvx-csw-path --check              # what is resolved, and what is built
+LVX_CSW=/other/tree ./bin/lvx-perf-import
+cd lvx-polybench && ./harness/run.sh --csw /other/tree
+```
+
+`bin/lvx-csw-path` owns the chain, so there is a single place to change it and
+a single place that documents it. Two properties it is built to have:
+
+- **A path you name is never silently replaced by a fallback.** Point at the
+  wrong tree and the error says which mechanism named it — because the failure
+  this design exists to prevent is quietly measuring a *different* checkout's
+  compiler and filing the numbers as if they were this one's.
+- **"There but not built" is reported as itself.** A fresh `lvx-csw` clone has
+  no `lvx-toolchain/`, and that is its ordinary state, not a broken tree; the
+  error says `make install-minimal-toolchain` rather than leaving a missing
+  compiler to surface as a failed compile thirty kernels in.
+
+The default is a default, not an assumption: `../lvx-csw` is where these
+checkouts usually sit, and naming any other path costs one line. Until
+2026-10-16 the harnesses took the suite's *parent directory* to be `lvx-csw`,
+which was true only while they were submodules of it — moving them here made
+that guess resolve to `lvx-perf`, which has no compiler in it at all.
+
 ## Tools
 
 Both are dependency-free — bash and Python 3, no packages to install.
 
 ```bash
 ./sync-submodules.sh                       # after cloning, and after a pull
+echo /path/to/lvx-csw > lvx-csw.path       # once per machine; see below
+./bin/lvx-csw-path --check                 # is it there, and is it built?
 
 # Run a sweep, in the suite's own submodule
 cd lvx-polybench && ./harness/run.sh && cd ..
 cd lvx-mibench   && ./harness/run.sh && cd ..
+cd lvx-ssw       && ./lvx/run-lvx.sh && cd ..
 
 # Snapshot whatever the suites currently have in results/
 ./bin/lvx-perf-import
@@ -135,6 +197,8 @@ lvx-polybench/          submodule: the suites and their harnesses, where
 lvx-mibench/              sweeps are run and results/ is written
 lvx-ssw/
 sync-submodules.sh      init/update the submodules, on their branches
+lvx-csw.path            where lvx-csw is on this machine (not committed)
+bin/lvx-csw-path        resolve/check lvx-csw; owns the resolution chain
 bin/lvx-perf-import     snapshot the suites' results/, with provenance
 bin/lvx-perf-trend      one metric per benchmark, across snapshots
 snapshots/<date>/       the data; see snapshots/README.md for the schema

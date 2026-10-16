@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Part of the LVX project, under the Apache License v2.0 with LLVM Exceptions.
+# See LICENSE.TXT in the root of this repository for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Resolve, and optionally check, the lvx-csw checkout this repository measures.
+#
+#   ./bin/lvx-csw-path                 # print the path, or fail saying why
+#   ./bin/lvx-csw-path --check         # also report what is and is not built
+#   ./bin/lvx-csw-path --from          # print the path and how it was chosen
+#   ./bin/lvx-csw-path --csw /some/tree --check
+#
+# lvx-perf is not self-contained and cannot be: it measures a toolchain that is
+# a build product of a *built* lvx-csw checkout, and lvx-toolchain/bin and
+# lvx-gem5/build are in nobody's git. So lvx-csw's location is a parameter
+# everywhere -- here, in bin/lvx-perf-import, and in each suite's harness --
+# resolved the same way by all of them:
+#
+#   --csw <path>            explicit, for a one-off or a CI job
+#   $LVX_CSW                environment, for a shell session
+#   ./lvx-csw.path          one line, per machine, not committed
+#   ../lvx-csw              the default: the two checkouts as siblings
+#   ~/lvx-csw               last resort
+#
+# Set it once per machine and forget it:
+#
+#   echo /path/to/lvx-csw > lvx-csw.path
+
+set -euo pipefail
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+CHECK=0 SHOW_FROM=0 CSW_ARG=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check)   CHECK=1; shift ;;
+        --from)    SHOW_FROM=1; shift ;;
+        --csw)     CSW_ARG=${2:-}; [ -n "$CSW_ARG" ] || { echo "--csw needs a path" >&2; exit 2; }; shift 2 ;;
+        --csw=*)   CSW_ARG=${1#--csw=}; shift ;;
+        -h|--help) sed -n '6,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)         echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+# Resolution. An explicitly named tree is never silently replaced by a
+# fallback: if you name it and it is wrong, you get told which mechanism
+# named it rather than measuring some other checkout's compiler.
+from= path=
+if [ -n "$CSW_ARG" ]; then
+    path=$CSW_ARG; from='--csw'
+elif [ -n "${LVX_CSW:-}" ]; then
+    path=$LVX_CSW; from='$LVX_CSW'
+elif [ -r "$HERE/lvx-csw.path" ]; then
+    path=$(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$HERE/lvx-csw.path" \
+           | grep -v '^[[:space:]]*$' | head -1 || true)
+    if [ -n "$path" ]; then
+        from="lvx-csw.path"
+        case $path in /*) ;; *) path=$HERE/$path ;; esac
+    fi
+fi
+if [ -z "$path" ]; then
+    for c in "$HERE/../lvx-csw" "$HOME/lvx-csw"; do
+        if [ -d "$c/lvx-mds" ] || [ -d "$c/validation" ]; then
+            path=$c; from='default sibling'; break
+        fi
+    done
+fi
+
+if [ -z "$path" ]; then
+    cat >&2 <<EOM
+error: cannot find lvx-csw. lvx-perf measures the toolchain lvx-csw builds,
+       so it needs to know where that checkout is.
+
+Name it -- highest precedence first:
+    $0 --csw /path/to/lvx-csw
+    LVX_CSW=/path/to/lvx-csw ...
+    echo /path/to/lvx-csw > $HERE/lvx-csw.path
+or put the two checkouts side by side, which is the default:
+    $HERE/../lvx-csw
+EOM
+    exit 2
+fi
+
+[ -d "$path" ] || { echo "error: lvx-csw path does not exist: $path  (from $from)" >&2; exit 2; }
+CSW=$(cd "$path" && pwd)
+if [ ! -d "$CSW/lvx-mds" ] && [ ! -d "$CSW/validation" ]; then
+    echo "error: $CSW does not look like an lvx-csw checkout  (from $from)" >&2
+    echo "       expected lvx-mds/ and validation/ inside it" >&2
+    exit 2
+fi
+
+if [ "$SHOW_FROM" = 1 ]; then
+    printf '%s\t%s\n' "$CSW" "$from"
+else
+    printf '%s\n' "$CSW"
+fi
+
+[ "$CHECK" = 1 ] || exit 0
+
+# What the suites actually reach for. Reported together, because discovering
+# these one failed run at a time is how an afternoon goes missing.
+echo
+echo "lvx-csw: $CSW  (from $from)"
+rc=0
+report() {
+    if [ -e "$2" ]; then printf '  built    %-28s %s\n' "$1" "$2"
+    else                 printf '  MISSING  %-28s %s\n' "$1" "$2"; rc=1; fi
+}
+report "cross compiler"      "$CSW/lvx-toolchain/bin/lvx-mbr-gcc"
+report "assembler"           "$CSW/lvx-toolchain/bin/lvx-mbr-as"
+report "ISS, lvx-1"          "$CSW/lvx-gem5/build/gem5-lvx1.opt"
+report "ISS, lvx-2"          "$CSW/lvx-gem5/build/gem5-lvx2.opt"
+report "ISS run config"      "$CSW/lvx-gem5/tests/lvx/run_lvx.py"
+report "linker scripts"      "$CSW/lvx-newlib/libgloss/lvx-mbr/linker_scripts"
+report "SIMDe (lvx-ssw)"     "$CSW/lvx-simde/simde/x86/sse2.h"
+report "crt.S (lvx-ssw)"     "$CSW/validation/lib/crt.S"
+if [ "$rc" != 0 ]; then
+    echo
+    echo "Some pieces are not built. lvx-toolchain/ and lvx-gem5/build/ are"
+    echo "build products and are in nobody's git, so this is the ordinary"
+    echo "state of a fresh clone, not a broken tree:"
+    echo "    make -C '$CSW' install-minimal-toolchain"
+    echo "    # and build the ISS per core in lvx-gem5"
+fi
+exit $rc

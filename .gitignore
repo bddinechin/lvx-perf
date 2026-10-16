@@ -18,3 +18,9 @@ m5out/
 # The suites are submodules and ignore their own build output; a superproject
 # .gitignore cannot reach inside a submodule regardless. Sweeps are run in
 # them, so build artifacts land there, not here.
+
+# Where lvx-csw is on THIS machine. lvx-perf measures a toolchain that lvx-csw
+# builds, so every tool and harness here needs that path -- and it differs per
+# machine, which is the whole reason it is a parameter and not a constant.
+# Deliberately not committed: see bin/lvx-csw-path.
+/lvx-csw.path

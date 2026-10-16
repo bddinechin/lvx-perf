@@ -9,11 +9,13 @@
 #   ./bin/lvx-perf-import                    # today's date, every suite
 #   ./bin/lvx-perf-import --date 2026-10-14  # back-date (use the sweep's date)
 #   ./bin/lvx-perf-import --suite polybench
-#   CSW=/path/to/lvx-csw ./bin/lvx-perf-import
+#   ./bin/lvx-perf-import --csw /path/to/lvx-csw
+#   LVX_CSW=/path/to/lvx-csw ./bin/lvx-perf-import
 #
 # The benchmark suites are submodules of THIS repository, so a sweep's results
 # are read from ./lvx-<suite>/results. The compilers are not: they live in
-# lvx-csw, which is where the toolchain half of the provenance comes from.
+# lvx-csw, whose location is a parameter -- see bin/lvx-csw-path for the
+# resolution chain, which every tool and harness here shares.
 #
 # A results TSV on its own is not a performance record. The ISS is
 # deterministic, so the same ELF gives the same cycle count forever; a number
@@ -26,12 +28,15 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 DATE=$(date +%F)
 SUITES=""
+CSW_ARG=${LVX_CSW:-}
 ALLOW_DIRTY=${ALLOW_DIRTY:-0}
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --date)        DATE="$2"; shift 2 ;;
         --suite)       SUITES="$SUITES $2"; shift 2 ;;
+        --csw)         CSW_ARG="$2"; shift 2 ;;
+        --csw=*)       CSW_ARG="${1#--csw=}"; shift ;;
         --allow-dirty) ALLOW_DIRTY=1; shift ;;
         -h|--help)     sed -n '6,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)             echo "unknown argument: $1" >&2; exit 2 ;;
@@ -45,12 +50,14 @@ case "$DATE" in
     *) echo "--date wants YYYY-MM-DD, got '$DATE'" >&2; exit 2 ;;
 esac
 
-# Locate lvx-csw for the toolchain revisions. Never hardcode a checkout path.
-CSW=${CSW:-}
-if [ -z "$CSW" ]; then
-    for cand in "$HERE/../lvx-csw" "$HOME/lvx-csw"; do
-        [ -d "$cand/.git" ] && { CSW=$(cd "$cand" && pwd); break; }
-    done
+# Locate lvx-csw for the toolchain revisions, by the one chain every tool and
+# harness here shares: --csw, $LVX_CSW, lvx-csw.path, ../lvx-csw, ~/lvx-csw.
+# bin/lvx-csw-path owns it so there is a single place to change it, and a
+# single place that documents it.
+CSW= CSW_FROM=
+if resolved=$("$HERE/bin/lvx-csw-path" --from ${CSW_ARG:+--csw "$CSW_ARG"} 2>/dev/null); then
+    CSW=${resolved%%$'\t'*}
+    CSW_FROM=${resolved##*$'\t'}
 fi
 
 # A component's revision, plus whether its tracked state is dirty. Benchmark
@@ -82,6 +89,12 @@ fi
 DEST="$HERE/snapshots/$DATE"
 mkdir -p "$DEST"
 
+# MANIFEST.new is provenance that has not yet been accepted. If this script
+# dies or is interrupted before the mv below, it must not survive: a stray
+# half-written manifest in a snapshot directory reads like a real record, and
+# it is gitignored, so nothing would draw attention to it.
+trap 'rm -f "$DEST/MANIFEST.new"; rmdir "$DEST" 2>/dev/null || true' EXIT
+
 {
     echo "# LVX performance snapshot -- provenance for the TSVs beside this file."
     echo "# Written by bin/lvx-perf-import; edit only to add a note= line."
@@ -101,6 +114,7 @@ mkdir -p "$DEST"
     done
     # Toolchain: lvx-csw and its compiler submodules.
     if [ -n "$CSW" ]; then
+        printf '# toolchain read from %s (located via %s)\n' "$CSW" "$CSW_FROM"
         printf 'lvx-csw\t%s\n' "$(describe_at "$CSW" toolchain)"
         for c in lvx-mds lvx-binutils lvx-gcc/gcc lvx-llvm/llvm-project \
                  lvx-gem5 lvx-newlib; do
@@ -128,20 +142,20 @@ if dirty_inputs | grep -q .; then
         dirty_inputs | sed 's/^/    /' >&2
         echo "Commit there, or pass --allow-dirty to record the snapshot as" >&2
         echo "unreproducible. Uncommitted results/ do not count as dirty." >&2
-        rm -f "$DEST/MANIFEST.new"
-        rmdir "$DEST" 2>/dev/null || true
         exit 1
     fi
     sed -i 's/^provenance\t.*/provenance\tunreproducible-dirty-tree/' "$DEST/MANIFEST.new"
 fi
 
 if [ -z "$CSW" ]; then
-    echo "warning: no lvx-csw checkout found (set CSW=); the snapshot will" >&2
+    echo "warning: no lvx-csw checkout found (see bin/lvx-csw-path); the" >&2
+    echo "         snapshot will" >&2
     echo "         name no compiler revision, which makes it hard to read" >&2
     echo "         later. Continuing." >&2
 fi
 
 mv "$DEST/MANIFEST.new" "$DEST/MANIFEST"
+trap - EXIT
 
 copied=0
 for suite in $SUITES; do
