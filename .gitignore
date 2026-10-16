@@ -14,3 +14,7 @@ m5out/
 
 # Personal scratch: a one-line `claude --resume <session-id>` reminder.
 /RESUME
+
+# The suites are submodules and ignore their own build output; a superproject
+# .gitignore cannot reach inside a submodule regardless. Sweeps are run in
+# them, so build artifacts land there, not here.

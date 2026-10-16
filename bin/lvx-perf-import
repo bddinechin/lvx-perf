@@ -3,18 +3,22 @@
 # See LICENSE.TXT in the root of this repository for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Import a benchmark sweep from an lvx-csw checkout into this repository as a
-# dated snapshot, stamped with the toolchain revisions that produced it.
+# Snapshot a benchmark sweep into snapshots/<date>/, stamped with the revisions
+# that produced it.
 #
-#   ./bin/lvx-perf-import                    # today's date, both suites
+#   ./bin/lvx-perf-import                    # today's date, every suite
 #   ./bin/lvx-perf-import --date 2026-10-14  # back-date (use the sweep's date)
 #   ./bin/lvx-perf-import --suite polybench
 #   CSW=/path/to/lvx-csw ./bin/lvx-perf-import
 #
-# A results TSV on its own is not a performance record: the same kernel and the
-# same ISS give the same cycle count forever, so a number only means something
-# next to the compiler that emitted it. That is what MANIFEST carries, and why
-# import refuses to run against a dirty source tree unless told otherwise.
+# The benchmark suites are submodules of THIS repository, so a sweep's results
+# are read from ./lvx-<suite>/results. The compilers are not: they live in
+# lvx-csw, which is where the toolchain half of the provenance comes from.
+#
+# A results TSV on its own is not a performance record. The ISS is
+# deterministic, so the same ELF gives the same cycle count forever; a number
+# only means something next to the compiler that emitted it. That is what
+# MANIFEST carries, and why import refuses to run against a dirty input tree.
 
 set -euo pipefail
 
@@ -29,41 +33,44 @@ while [ $# -gt 0 ]; do
         --date)        DATE="$2"; shift 2 ;;
         --suite)       SUITES="$SUITES $2"; shift 2 ;;
         --allow-dirty) ALLOW_DIRTY=1; shift ;;
-        -h|--help)     sed -n '6,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)     sed -n '6,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)             echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
-[ -n "$SUITES" ] || SUITES="polybench mibench"
+[ -n "$SUITES" ] || SUITES="polybench mibench ssw"
 
 case "$DATE" in
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
     *) echo "--date wants YYYY-MM-DD, got '$DATE'" >&2; exit 2 ;;
 esac
 
-# Locate the superproject. Never hardcode a checkout path -- derive it.
+# Locate lvx-csw for the toolchain revisions. Never hardcode a checkout path.
 CSW=${CSW:-}
 if [ -z "$CSW" ]; then
     for cand in "$HERE/../lvx-csw" "$HOME/lvx-csw"; do
         [ -d "$cand/.git" ] && { CSW=$(cd "$cand" && pwd); break; }
     done
 fi
-[ -n "$CSW" ] || { echo "no lvx-csw checkout found; set CSW=" >&2; exit 1; }
-[ -d "$CSW/.git" ] || { echo "CSW=$CSW is not a git checkout" >&2; exit 1; }
 
-# Provenance, gathered before anything is copied. A sweep whose source tree has
-# uncommitted changes cannot be tied to a revision, so it is not a data point
-# anyone can reproduce -- including you, next month.
-rev_of() {
-    local path=$1
-    if [ -d "$CSW/$path/.git" ] || [ -f "$CSW/$path/.git" ]; then
-        local sha desc
-        sha=$(git -C "$CSW/$path" rev-parse HEAD 2>/dev/null || echo unknown)
-        desc=$(git -C "$CSW/$path" describe --always --dirty 2>/dev/null || echo unknown)
-        printf '%s\t%s\n' "$sha" "$desc"
-    else
-        printf '%s\t%s\n' absent absent
+# A component's revision, plus whether its tracked state is dirty. Benchmark
+# repositories are asked about their source only: `results/` is this sweep's
+# output, and an uncommitted result must not be mistaken for a changed input.
+describe_at() {
+    local repo=$1 kind=$2 sha desc dirt
+    if [ ! -e "$repo/.git" ]; then
+        printf 'absent\tabsent\n'
+        return
     fi
+    sha=$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo unknown)
+    desc=$(git -C "$repo" describe --always 2>/dev/null || echo unknown)
+    if [ "$kind" = benchmark ]; then
+        dirt=$(git -C "$repo" status --porcelain -- . ':(exclude)results' 2>/dev/null | head -1)
+    else
+        dirt=$(git -C "$repo" status --porcelain 2>/dev/null | head -1)
+    fi
+    [ -n "$dirt" ] && desc="$desc-dirty"
+    printf '%s\t%s\n' "$sha" "$desc"
 }
 
 if [ "$DATE" = "$(date +%F)" ]; then
@@ -87,38 +94,64 @@ mkdir -p "$DEST"
     printf 'provenance\t%s\n' "$PROVENANCE"
     echo "#"
     echo "# component<TAB>sha<TAB>describe"
-    for c in . lvx-mds lvx-binutils lvx-gcc/gcc lvx-llvm/llvm-project lvx-gem5 \
-             lvx-newlib lvx-mibench lvx-polybench; do
-        name=$c; [ "$c" = "." ] && name=lvx-csw
-        printf '%s\t%s\n' "$name" "$(rev_of "$c")"
+    # Benchmark suites: submodules of this repository.
+    printf 'lvx-perf\t%s\n' "$(describe_at "$HERE" benchmark)"
+    for b in lvx-mibench lvx-polybench lvx-ssw; do
+        printf '%s\t%s\n' "$b" "$(describe_at "$HERE/$b" benchmark)"
     done
+    # Toolchain: lvx-csw and its compiler submodules.
+    if [ -n "$CSW" ]; then
+        printf 'lvx-csw\t%s\n' "$(describe_at "$CSW" toolchain)"
+        for c in lvx-mds lvx-binutils lvx-gcc/gcc lvx-llvm/llvm-project \
+                 lvx-gem5 lvx-newlib; do
+            printf '%s\t%s\n' "$c" "$(describe_at "$CSW/$c" toolchain)"
+        done
+    else
+        echo "# lvx-csw not found at import time -- toolchain revisions unknown."
+    fi
 } > "$DEST/MANIFEST.new"
 
-# Read the dirt back out of the file: rev_of runs in a command substitution,
-# so a flag it set would be lost with its subshell.
-dirty_seen=0
-if grep -q -- '-dirty$' "$DEST/MANIFEST.new"; then
-    dirty_seen=1
+# Read the dirt back out of the file: describe_at runs in a command
+# substitution, so a flag it set would be lost with its subshell.
+#
+# This repository's own line is recorded but never gates: lvx-perf holds the
+# snapshots and the tools, not an input to the measurement, so an unstaged
+# README must not block an import. Everything else is an input.
+dirty_inputs() {
+    grep -- '-dirty$' "$DEST/MANIFEST.new" | grep -v "^lvx-perf$(printf '\t')"
+}
+
+if dirty_inputs | grep -q .; then
+    if [ "$ALLOW_DIRTY" != 1 ]; then
+        echo "refusing to import: an input tree is dirty, so these numbers" >&2
+        echo "cannot be tied to a revision:" >&2
+        dirty_inputs | sed 's/^/    /' >&2
+        echo "Commit there, or pass --allow-dirty to record the snapshot as" >&2
+        echo "unreproducible. Uncommitted results/ do not count as dirty." >&2
+        rm -f "$DEST/MANIFEST.new"
+        rmdir "$DEST" 2>/dev/null || true
+        exit 1
+    fi
+    sed -i 's/^provenance\t.*/provenance\tunreproducible-dirty-tree/' "$DEST/MANIFEST.new"
 fi
 
-if [ "$dirty_seen" = 1 ] && [ "$ALLOW_DIRTY" != 1 ]; then
-    echo "refusing to import: a source tree under $CSW is dirty, so these" >&2
-    echo "numbers cannot be tied to a revision:" >&2
-    grep -- '-dirty$' "$DEST/MANIFEST.new" | sed 's/^/    /' >&2
-    echo "Commit there, or pass --allow-dirty to record the snapshot as" >&2
-    echo "unreproducible." >&2
-    rm -f "$DEST/MANIFEST.new"
-    rmdir "$DEST" 2>/dev/null || true
-    exit 1
+if [ -z "$CSW" ]; then
+    echo "warning: no lvx-csw checkout found (set CSW=); the snapshot will" >&2
+    echo "         name no compiler revision, which makes it hard to read" >&2
+    echo "         later. Continuing." >&2
 fi
+
 mv "$DEST/MANIFEST.new" "$DEST/MANIFEST"
-[ "$dirty_seen" = 1 ] && sed -i 's/^provenance\t.*/provenance\tunreproducible-dirty-tree/' "$DEST/MANIFEST"
 
 copied=0
 for suite in $SUITES; do
-    src="$CSW/lvx-$suite/results"
+    src="$HERE/lvx-$suite/results"
     if [ ! -d "$src" ]; then
-        echo "  $suite: no results/ at $src -- skipped"
+        if [ -d "$HERE/lvx-$suite" ]; then
+            echo "  $suite: no results/ -- no TSV harness yet, skipped"
+        else
+            echo "  $suite: no lvx-$suite submodule -- run git submodule update --init"
+        fi
         continue
     fi
     shopt -s nullglob

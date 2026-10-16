@@ -1,0 +1,14 @@
+[submodule "lvx-mibench"]
+	path = lvx-mibench
+	url = git@github.com:bddinechin/lvx-mibench.git
+	branch = main
+	update = merge
+[submodule "lvx-polybench"]
+	path = lvx-polybench
+	url = git@github.com:bddinechin/lvx-polybench.git
+	branch = main
+	update = merge
+[submodule "lvx-ssw"]
+	path = lvx-ssw
+	url = git@github.com:bddinechin/lvx-ssw.git
+	branch = lvx-ssw
