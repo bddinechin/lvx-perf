@@ -9,6 +9,7 @@
   ./bin/lvx-perf-trend --suite mibench --config lvx-2-O2 --metric cycles
   ./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double --only gemm,syrk
   ./bin/lvx-perf-trend --suite ssw --config lvx-2-O2
+  ./bin/lvx-perf-trend --suite polybench --config lvx-2-clang-O2-mini-double
 
 Rows are benchmarks, columns are snapshot dates, and the last column is the
 change from the first measurement to the latest. A cell is blank where that

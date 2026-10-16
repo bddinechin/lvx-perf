@@ -1,6 +1,10 @@
 # `snapshots/` — the data
 
-One directory per sweep date, written by `../bin/lvx-perf-import`:
+One directory per sweep date, written by `../bin/lvx-perf-import`. A second
+sweep on the same day goes beside the first as `<YYYY-MM-DD>.<n>` (`--seq n`),
+never into it: one `MANIFEST` vouches for every TSV in its directory, so adding
+a later sweep there would stamp the earlier numbers with the later SHAs. The
+importer refuses to write into an existing snapshot.
 
 ```
 snapshots/<YYYY-MM-DD>/

@@ -176,6 +176,7 @@ echo /path/to/lvx-csw > lvx-csw.path       # once per machine; see below
 cd lvx-polybench && ./harness/run.sh && cd ..
 cd lvx-mibench   && ./harness/run.sh && cd ..
 cd lvx-ssw       && ./harness/run.sh && cd ..
+cd lvx-polybench && COMPILER=clang ./harness/run.sh && cd ..   # lvx-llvm
 
 # Snapshot whatever the suites currently have in results/
 ./bin/lvx-perf-import
@@ -219,6 +220,36 @@ qsort_small        19,812,178    18,249,540    18,263,018    18,263,033      -7.
 sha                13,400,010    13,619,291    13,619,267    13,619,275      +1.6%
 susan_edges         2,883,671     2,813,940     2,813,922     2,813,928      -2.4%
 ```
+
+## Two compilers, two series
+
+Every harness takes `COMPILER=gcc|clang`, default `gcc`. A clang sweep is a
+**separate configuration**, not extra rows: its files are named with `-clang`
+after the arch — `lvx-2-clang-O2-mini-double`, `lvx-2-clang-O2` — so
+`lvx-perf-import` snapshots them beside the GCC files and `lvx-perf-trend
+--config lvx-2-clang-O2` reads them back as their own series. GCC keeps the
+unmarked names so the series that predates clang is continuous. Both
+compilers' SHAs are in every `MANIFEST` already, so a snapshot holding both
+names the revision behind each.
+
+The harness, not the caller, picks the core flag: lvx-gcc spells it
+`-march=lvx-2`, clang `-mcpu=lvx-2`. Until lvx-llvm `d7a03955` (2026-10-16)
+clang given `-march=lvx-2` only warned and emitted **lvx-1** code, which would
+then have been timed under the lvx-2 ISS; `-march` is an alias there now, and
+the harness passes `-mcpu` regardless. Both drivers link the
+same runtime (crt0, newlib, libgloss, libgcc and `lvx-sim.ld` are lvx-gcc's),
+so a GCC/clang difference is a code-generation difference.
+
+Which core clang can target depends on the machine description `lvx-csw`
+installed into lvx-llvm, not on `-mcpu`: since 2026-10-16 that is `lvx_v2`,
+on which `-mcpu=lvx-1` is **unsupported** — the vectorizer still emits lvx-2
+instructions, and some programs then fail to assemble or compute a wrong
+answer. Sweep clang on lvx-2 only unless `lvx-llvm/CLAUDE.md` says otherwise;
+the correctness gate would catch a wrong answer, but the number would not be
+an lvx-1 measurement either way.
+
+A build failure is recorded as a row (`buildfail`, `BUILD_OR_SELFCHECK`), not
+dropped, so the day it starts building shows up in the series.
 
 ## Layout
 

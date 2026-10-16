@@ -107,7 +107,14 @@ report() {
     else                 printf '  MISSING  %-28s %s\n' "$1" "$2"; rc=1; fi
 }
 report "cross compiler"      "$CSW/lvx-toolchain/bin/lvx-mbr-gcc"
-report "assembler"           "$CSW/lvx-toolchain/bin/lvx-mbr-as"
+# clang is wanted only by COMPILER=clang sweeps, so its absence is reported but
+# does not fail the check: a GCC-only tree is complete for every default sweep.
+if [ -e "$CSW/lvx-toolchain/bin/lvx-mbr-clang" ]; then
+    printf '  built    %-28s %s\n' "clang (COMPILER=clang)" "$CSW/lvx-toolchain/bin/lvx-mbr-clang"
+else
+    printf '  absent   %-28s %s\n' "clang (COMPILER=clang)" "$CSW/lvx-toolchain/bin/lvx-mbr-clang"
+fi
+report "assembler"          "$CSW/lvx-toolchain/bin/lvx-mbr-as"
 report "ISS, lvx-1"          "$CSW/lvx-gem5/build/gem5-lvx1.opt"
 report "ISS, lvx-2"          "$CSW/lvx-gem5/build/gem5-lvx2.opt"
 report "ISS run config"      "$CSW/lvx-gem5/tests/lvx/run_lvx.py"
