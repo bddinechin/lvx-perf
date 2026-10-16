@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Part of the LVX project, under the Apache License v2.0 with LLVM Exceptions.
+# See LICENSE.TXT in the root of this repository for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Import a benchmark sweep from an lvx-csw checkout into this repository as a
+# dated snapshot, stamped with the toolchain revisions that produced it.
+#
+#   ./bin/lvx-perf-import                    # today's date, both suites
+#   ./bin/lvx-perf-import --date 2026-10-14  # back-date (use the sweep's date)
+#   ./bin/lvx-perf-import --suite polybench
+#   CSW=/path/to/lvx-csw ./bin/lvx-perf-import
+#
+# A results TSV on its own is not a performance record: the same kernel and the
+# same ISS give the same cycle count forever, so a number only means something
+# next to the compiler that emitted it. That is what MANIFEST carries, and why
+# import refuses to run against a dirty source tree unless told otherwise.
+
+set -euo pipefail
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+DATE=$(date +%F)
+SUITES=""
+ALLOW_DIRTY=${ALLOW_DIRTY:-0}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --date)        DATE="$2"; shift 2 ;;
+        --suite)       SUITES="$SUITES $2"; shift 2 ;;
+        --allow-dirty) ALLOW_DIRTY=1; shift ;;
+        -h|--help)     sed -n '6,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)             echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+[ -n "$SUITES" ] || SUITES="polybench mibench"
+
+case "$DATE" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *) echo "--date wants YYYY-MM-DD, got '$DATE'" >&2; exit 2 ;;
+esac
+
+# Locate the superproject. Never hardcode a checkout path -- derive it.
+CSW=${CSW:-}
+if [ -z "$CSW" ]; then
+    for cand in "$HERE/../lvx-csw" "$HOME/lvx-csw"; do
+        [ -d "$cand/.git" ] && { CSW=$(cd "$cand" && pwd); break; }
+    done
+fi
+[ -n "$CSW" ] || { echo "no lvx-csw checkout found; set CSW=" >&2; exit 1; }
+[ -d "$CSW/.git" ] || { echo "CSW=$CSW is not a git checkout" >&2; exit 1; }
+
+# Provenance, gathered before anything is copied. A sweep whose source tree has
+# uncommitted changes cannot be tied to a revision, so it is not a data point
+# anyone can reproduce -- including you, next month.
+rev_of() {
+    local path=$1
+    if [ -d "$CSW/$path/.git" ] || [ -f "$CSW/$path/.git" ]; then
+        local sha desc
+        sha=$(git -C "$CSW/$path" rev-parse HEAD 2>/dev/null || echo unknown)
+        desc=$(git -C "$CSW/$path" describe --always --dirty 2>/dev/null || echo unknown)
+        printf '%s\t%s\n' "$sha" "$desc"
+    else
+        printf '%s\t%s\n' absent absent
+    fi
+}
+
+if [ "$DATE" = "$(date +%F)" ]; then
+    PROVENANCE=exact
+else
+    PROVENANCE=as-of-import
+fi
+
+DEST="$HERE/snapshots/$DATE"
+mkdir -p "$DEST"
+
+{
+    echo "# LVX performance snapshot -- provenance for the TSVs beside this file."
+    echo "# Written by bin/lvx-perf-import; edit only to add a note= line."
+    printf 'date\t%s\n' "$DATE"
+    printf 'imported\t%s\n' "$(date -u +%FT%TZ)"
+    printf 'host\t%s\n' "$(uname -sm)"
+    # The SHAs below are read at import time. They describe the sweep exactly
+    # only when the sweep was taken from this same tree state; a back-dated
+    # import may name revisions that postdate the numbers.
+    printf 'provenance\t%s\n' "$PROVENANCE"
+    echo "#"
+    echo "# component<TAB>sha<TAB>describe"
+    for c in . lvx-mds lvx-binutils lvx-gcc/gcc lvx-llvm/llvm-project lvx-gem5 \
+             lvx-newlib lvx-mibench lvx-polybench; do
+        name=$c; [ "$c" = "." ] && name=lvx-csw
+        printf '%s\t%s\n' "$name" "$(rev_of "$c")"
+    done
+} > "$DEST/MANIFEST.new"
+
+# Read the dirt back out of the file: rev_of runs in a command substitution,
+# so a flag it set would be lost with its subshell.
+dirty_seen=0
+if grep -q -- '-dirty$' "$DEST/MANIFEST.new"; then
+    dirty_seen=1
+fi
+
+if [ "$dirty_seen" = 1 ] && [ "$ALLOW_DIRTY" != 1 ]; then
+    echo "refusing to import: a source tree under $CSW is dirty, so these" >&2
+    echo "numbers cannot be tied to a revision:" >&2
+    grep -- '-dirty$' "$DEST/MANIFEST.new" | sed 's/^/    /' >&2
+    echo "Commit there, or pass --allow-dirty to record the snapshot as" >&2
+    echo "unreproducible." >&2
+    rm -f "$DEST/MANIFEST.new"
+    rmdir "$DEST" 2>/dev/null || true
+    exit 1
+fi
+mv "$DEST/MANIFEST.new" "$DEST/MANIFEST"
+[ "$dirty_seen" = 1 ] && sed -i 's/^provenance\t.*/provenance\tunreproducible-dirty-tree/' "$DEST/MANIFEST"
+
+copied=0
+for suite in $SUITES; do
+    src="$CSW/lvx-$suite/results"
+    if [ ! -d "$src" ]; then
+        echo "  $suite: no results/ at $src -- skipped"
+        continue
+    fi
+    shopt -s nullglob
+    files=("$src"/*.tsv)
+    shopt -u nullglob
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "  $suite: results/ is empty -- skipped"
+        continue
+    fi
+    mkdir -p "$DEST/$suite"
+    n=0 other=0
+    for f in "${files[@]}"; do
+        base=$(basename "$f" .tsv)
+        # MiBench writes results/<arch>-O<opt>-<date>.tsv, keeping its own
+        # history in the filename; PolyBench overwrites one file per config.
+        # Strip a trailing date so a config has one stable name here, and keep
+        # a self-dated sweep out of any snapshot but its own -- otherwise a
+        # single MANIFEST would appear to vouch for sweeps taken weeks apart.
+        case "$base" in
+            *-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+                fdate=${base: -10}
+                config=${base%-"$fdate"}
+                if [ "$fdate" != "$DATE" ]; then
+                    other=$((other + 1))
+                    continue
+                fi
+                ;;
+            *) config=$base ;;
+        esac
+        # Verbatim copy. The harness TSV is the record; this repository adds
+        # provenance and history around it, and never rewrites a number.
+        cp -p "$f" "$DEST/$suite/$config.tsv"
+        n=$((n + 1))
+        copied=$((copied + 1))
+    done
+    msg="  $suite: $n file(s)"
+    [ "$other" -gt 0 ] && msg="$msg ($other self-dated sweep(s) for other dates, skipped)"
+    echo "$msg"
+    rmdir "$DEST/$suite" 2>/dev/null || true
+done
+
+[ "$copied" -gt 0 ] || { echo "nothing imported" >&2; exit 1; }
+
+echo
+echo "snapshot: snapshots/$DATE  ($copied TSV file(s))"
+echo "review it, then:  git add snapshots/$DATE && git commit"

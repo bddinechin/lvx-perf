@@ -1,0 +1,16 @@
+# Part of the LVX project, under the Apache License v2.0 with LLVM Exceptions.
+# See LICENSE.TXT in the root of this repository for license information.
+
+# Python bytecode -- never commit these.
+__pycache__/
+*.pyc
+
+# A half-written MANIFEST from an import that refused or was interrupted.
+snapshots/*/MANIFEST.new
+
+# gem5 run output. Sweeps are run in lvx-csw, not here, but the ISS drops an
+# m5out/ wherever it is invoked from and a stray one must never be committed.
+m5out/
+
+# Personal scratch: a one-line `claude --resume <session-id>` reminder.
+/RESUME

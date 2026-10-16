@@ -1,0 +1,17 @@
+# LVX performance snapshot -- provenance for the TSVs beside this file.
+# Written by bin/lvx-perf-import; edit only to add a note= line.
+date	2026-10-14
+imported	2026-10-16T05:54:31Z
+host	Linux x86_64
+provenance	as-of-import
+#
+# component<TAB>sha<TAB>describe
+lvx-csw	e9c33b86712da7da8388c2d7610bfd488386f7f4	e9c33b8
+lvx-mds	0d521b8d9c4731c8e305879c450d7b24bc0835cd	0d521b8
+lvx-binutils	d921aa145505513a71abd5bcb893ef5752cb948e	d921aa14
+lvx-gcc/gcc	5a94149d36d3203f11ca70c49e0b5e0b2b3c6219	basepoints/gcc-17-2144-g5a94149d36d
+lvx-llvm/llvm-project	b8e05f20688ec1b364fb4bee2b40da81e71e649f	b8e05f20688e
+lvx-gem5	c97b2f6fa6ac3dc9fc0dc899c171f910dac318d0	v25.1.0.0-107-gc97b2f6fa6
+lvx-newlib	078f5248c2b751682cb237b5d33029929a82ef23	078f524
+lvx-mibench	6f64bcf32ba49e3d5ad03f236615362998a06cb9	6f64bcf
+lvx-polybench	2c6e41977a965ae99b187b5e58dffc4bce8583c6	2c6e419

@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+# Part of the LVX project, under the Apache License v2.0 with LLVM Exceptions.
+# See LICENSE.TXT in the root of this repository for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+"""One metric per benchmark, across every snapshot that measured it.
+
+  ./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double
+  ./bin/lvx-perf-trend --suite mibench --config lvx-2-O2 --metric cycles
+  ./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double --only gemm,syrk
+
+Rows are benchmarks, columns are snapshot dates, and the last column is the
+change from the first measurement to the latest. A cell is blank where that
+snapshot did not run that benchmark -- suites gain and lose entries, and a gap
+is not a zero.
+
+Rows whose correctness column is not ok/fp-* are reported, never scored: on
+this target a miscompile reads as a large speed-up, so an ungated number is
+worse than no number.
+"""
+
+import argparse
+import csv
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SNAPSHOTS = ROOT / "snapshots"
+
+# The harness names the benchmark column differently per suite.
+KEY_COLUMNS = ("kernel", "benchmark")
+DEFAULT_METRIC = {"polybench": "kernel_cycles", "mibench": "cycles"}
+
+
+def is_correct(value):
+    """PolyBench/MiBench correctness verdicts that permit scoring.
+
+    'noref' means upstream shipped no reference output -- the run is real but
+    unchecked, so it is kept and flagged rather than silently scored.
+    """
+    return value == "ok" or value.startswith("fp-")
+
+
+def read_tsv(path, metric):
+    """-> (rows: {benchmark: (value, verdict)}, missing_metric: bool)"""
+    rows = {}
+    with path.open(newline="") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        if reader.fieldnames is None:
+            return rows, True
+        key = next((c for c in KEY_COLUMNS if c in reader.fieldnames), None)
+        if key is None or metric not in reader.fieldnames:
+            return rows, True
+        for row in reader:
+            name = (row.get(key) or "").strip()
+            raw = (row.get(metric) or "").strip()
+            if not name or not raw:
+                continue
+            try:
+                value = float(raw)
+            except ValueError:
+                continue
+            rows[name] = (value, (row.get("correct") or "").strip())
+    return rows, False
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("--suite", required=True, help="polybench | mibench")
+    ap.add_argument("--config", required=True,
+                    help="TSV basename without .tsv, e.g. lvx-2-O2-mini-double")
+    ap.add_argument("--metric", help="column to track (suite-specific default)")
+    ap.add_argument("--only", help="comma-separated benchmark subset")
+    args = ap.parse_args()
+
+    metric = args.metric or DEFAULT_METRIC.get(args.suite)
+    if not metric:
+        ap.error(f"no default metric for suite '{args.suite}'; pass --metric")
+
+    if not SNAPSHOTS.is_dir():
+        sys.exit(f"no snapshots/ directory at {SNAPSHOTS}")
+
+    dates, per_date, flagged, skipped = [], {}, {}, []
+    for snap in sorted(SNAPSHOTS.iterdir()):
+        tsv = snap / args.suite / f"{args.config}.tsv"
+        if not tsv.is_file():
+            continue
+        rows, bad_header = read_tsv(tsv, metric)
+        if bad_header:
+            skipped.append(f"{snap.name}: no '{metric}' column")
+            continue
+        if not rows:
+            continue
+        dates.append(snap.name)
+        per_date[snap.name] = rows
+        for name, (_, verdict) in rows.items():
+            if not is_correct(verdict):
+                flagged.setdefault(name, set()).add(verdict or "?")
+
+    if not dates:
+        sys.exit(f"no snapshot has {args.suite}/{args.config}.tsv "
+                 f"with a '{metric}' column")
+
+    names = sorted({n for rows in per_date.values() for n in rows})
+    if args.only:
+        wanted = {s.strip() for s in args.only.split(",") if s.strip()}
+        unknown = wanted - set(names)
+        if unknown:
+            sys.exit("not measured in any snapshot: " + ", ".join(sorted(unknown)))
+        names = [n for n in names if n in wanted]
+
+    width = max([len(n) for n in names] + [len("benchmark")])
+    cols = [max(len(d), 12) for d in dates]
+    header = "benchmark".ljust(width) + "  " + "  ".join(
+        d.rjust(w) for d, w in zip(dates, cols)) + "  " + "change".rjust(9)
+    print(f"{args.suite}/{args.config}  metric={metric}  "
+          f"(lower is better, {len(dates)} snapshot(s))\n")
+    print(header)
+    print("-" * len(header))
+
+    for name in names:
+        cells, series = [], []
+        for date, w in zip(dates, cols):
+            entry = per_date[date].get(name)
+            if entry is None:
+                cells.append("".rjust(w))
+            else:
+                value = entry[0]
+                series.append(value)
+                cells.append(f"{value:,.0f}".rjust(w))
+        # Compare first measured against last measured, not first against
+        # first column: a benchmark added later still has a usable series.
+        if len(series) >= 2 and series[0]:
+            delta = (series[-1] - series[0]) / series[0] * 100.0
+            change = f"{delta:+.1f}%".rjust(9)
+        else:
+            change = "-".rjust(9)
+        mark = " *" if name in flagged else ""
+        print(name.ljust(width) + "  " + "  ".join(cells) + "  " + change + mark)
+
+    if flagged:
+        print("\n* not correctness-gated -- reported, not a performance result:")
+        for name in sorted(flagged):
+            print(f"    {name}: {', '.join(sorted(flagged[name]))}")
+    for note in skipped:
+        print(f"\nskipped {note}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
