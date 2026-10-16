@@ -41,19 +41,36 @@ snapshot is immutable, dated, and names every revision behind it.
 |---|---|---|
 | `lvx-polybench/` | `main` | PolyBench/C 4.2.1-beta: 30 affine dense-FP loop nests, no input, no I/O, no syscalls. Did the vectorizer and the scheduler do their job. Cheap to sweep — minutes. |
 | `lvx-mibench/` | `main` | MiBench: 13 integer, control-flow-heavy applications — jpeg, ispell, blowfish, dijkstra. Portability and realism; exercises the C library, the ABI and `argv`. Tens of minutes to hours. |
-| `lvx-ssw/` | `lvx-ssw` | Smith-Waterman, **two algorithm shapes**: striped (Farrar, dominated by a data-dependent early exit) and inter-sequence (Rognes/SWIPE, no branch in the inner loop). Real-world bioinformatics, entirely SIMD integer, over SIMDe's SSE2. The LVX-2 SIMD instrument. |
+| `lvx-ssw/` | `lvx-ssw` | Smith-Waterman, **three rows**: striped (Farrar, dominated by a data-dependent early exit), inter-sequence (Rognes/SWIPE, no branch in the inner loop), and the same inter-sequence kernel fetching scores through `_mm_shuffle_epi8` to price the ISA's missing byte gather. Real-world bioinformatics, entirely SIMD integer, over SIMDe's SSE2. The LVX-2 SIMD instrument. |
 
 Each is pristine upstream in its first commit, so `git log` in a suite is the
 complete list of what porting required, and each carries its own `GAPS.md` and
 `harness/README.md` for the metrics and the traps.
 
-`lvx-ssw` carries **two benchmarks in one suite**, tracked as separate rows:
-`striped` and `inter`. They are not a speed contest with each other — different
+`lvx-ssw` carries **three benchmarks in one suite**, tracked as separate rows:
+`striped`, `inter` and `inter-gather`. They are not a speed contest with each other — different
 algorithms with different ceilings — but a compiler change can move one and not
 the other, which is the reason to have both. Measured 2026-10-16 on lvx-2 at
 `-O2`, striped runs 11.386 cycles per cell update and inter-sequence 2.850, a
 4.0× difference that is almost entirely the striped kernel's lazy-F fix-up loop
 and its data-dependent early exit.
+
+The third row prices an **ISA gap** rather than a compiler one. `inter-gather`
+is `inter` with one line changed — each lane's score fetched by
+`_mm_shuffle_epi8` instead of loaded from a precomputed profile — and it runs
+**40.588** cycles per cell, **14.2×** slower, on identical data with an
+identical checksum. LVX has only structured UZP/ZIP permutes and no
+runtime-indexed byte gather, so nothing in GCC or SIMDe can move that number;
+closing it would be an ISA change. Which is exactly why it is a *series*: the
+two rows converge the day such an instruction lands, and until then 14.2× is
+the figure the argument for adding one needs — a per-cell cost in a real
+kernel, not 22 instructions in a microbenchmark.
+
+That three-row shape is also the clearest illustration of why this repository
+tracks shapes rather than kernel counts. The same suite now distinguishes a
+branch-dominated kernel, a throughput kernel, and a kernel bottlenecked on one
+missing instruction — and a toolchain change can move any one of them without
+touching the others.
 
 That pairing exists because of what PolyBench showed the same day: a breadth
 gate can be completely blind to a change. The vector-comparison work left all

@@ -1,18 +1,18 @@
 # LVX performance snapshot -- provenance for the TSVs beside this file.
 # Written by bin/lvx-perf-import; edit only to add a note= line.
 date	2026-10-16
-imported	2026-10-16T08:13:30Z
+imported	2026-10-16T08:50:02Z
 host	Linux x86_64
-provenance	unreproducible-dirty-tree
-note	Adds the first ssw rows to the series: lvx-ssw gained a TSV harness and a second benchmark. striped 11.386 cycles/cell, inter-sequence 2.850 -- a 4.0x difference that is almost entirely the striped kernel lazy-F fix-up loop and its data-dependent early exit. Both correctness-gated twice: each driver self-checks (inter against a scalar Gotoh oracle sharing no intrinsic with the vector kernel), then the harness checks the printed checksum against harness/reference-checksums.tsv, which is generated from the NATIVE x86 builds so it can detect a target miscompile rather than perpetuate one. The polybench rows are the same re-measurement as before, unchanged. Toolchain measured is lvx-csw c86af24 / lvx-gcc 127ff2d12aa, one compiler binary throughout; the -dirty flags are a timing artifact, the only modified file being lvx-gcc gcc/config/lvx/lvx.cc, edited after both the build and the sweeps. lvx-1 is not yet measured for ssw: the scalar core scalarises all sixteen lanes and the run had not finished.
+provenance	exact
+note	Adds the inter-gather row, which prices LVX having no runtime-indexed byte gather at 14.2x. lvx-inter.c built with -DISB_GATHER differs from the inter row by ONE line -- each lane score fetched by _mm_shuffle_epi8 instead of loaded from a precomputed database profile -- and runs 40.588 cycles per cell against 2.850, on identical data, scores, oracle and cell count, with the identical checksum 374781626 asserted before the reference is written. That gap is NOT a toolchain defect and no compiler change can move it: the ISA has only structured UZP/ZIP permutes and no byte gather, so there is nothing for a SIMDe branch to reach, and closing it is an ISA change in lvx-mds. The series is the instrument -- the two rows converge the day such an instruction lands. The two gaps that WERE toolchain defects are both closed: _mm_movemask_epi8 earlier, signed saturating bytes in lvx-simde 369752db (adds_epi8, subs_epi8, subs_epi16 each 11 -> 2 instructions). The striped and inter rows were re-measured against that fix and are byte-identical to before it, 11.386 and 2.850, so the unsigned paths adjacent to the change did not regress. ONE PRECISION NOTE ON provenance=exact: every input tree was clean and all rows are from today, but the snapshot is not a single instant. The polybench TSVs were measured at 09:03:51, lvx-simde moved at 10:29:09, and the ssw TSVs at 10:48:24, so the lvx-simde SHA recorded here postdates the polybench rows. It does not describe them and does not need to: PolyBench is plain C floating-point loop nests and reaches SIMDe nowhere. The compiler, binutils, newlib, ISS and machine-description SHAs are the ones that bear on both suites, and those did not move between the two sweeps.
 #
 # component<TAB>sha<TAB>describe
-lvx-perf	cc8269f7037be22628c2f33c830cd43818b377d1	cc8269f-dirty
+lvx-perf	cde32b1bb8ad258d1b0dea43d57e5b71ee56c8e5	cde32b1-dirty
 lvx-mibench	740a7d50f2616601cc3b8d5cb2200848c5ace92e	740a7d5
 lvx-polybench	370642abbdd287e3c30e1ca0a1f181fa42c2177e	370642a
-lvx-ssw	1b28950761099027f3dfe8949bea9de023101b08	1b28950
+lvx-ssw	143f37ee343f81178b881c8949961d34d2afb86a	143f37e
 # toolchain read from /home/bd3/lvx-csw (located via default sibling)
-lvx-csw	948cd4086d6b5fa901e2cc76bc09fedb2829c095	948cd40-dirty
+lvx-csw	4174dabd2bb1871909d14d8a2413086cf2a01b97	4174dab
 lvx-mds	0d521b8d9c4731c8e305879c450d7b24bc0835cd	0d521b8
 lvx-binutils	d921aa145505513a71abd5bcb893ef5752cb948e	d921aa14
 lvx-gcc/gcc	127ff2d12aa18f3669cd5d797beaef269aa4fa4d	basepoints/gcc-17-2145-g127ff2d12aa
