@@ -9,6 +9,7 @@
 #   ./bin/lvx-perf-import                    # today's date, every suite
 #   ./bin/lvx-perf-import --date 2026-10-14  # back-date (use the sweep's date)
 #   ./bin/lvx-perf-import --suite polybench
+#   ./bin/lvx-perf-import --note 'why this snapshot is what it is'
 #   ./bin/lvx-perf-import --csw /path/to/lvx-csw
 #   LVX_CSW=/path/to/lvx-csw ./bin/lvx-perf-import
 #
@@ -29,6 +30,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DATE=$(date +%F)
 SUITES=""
 CSW_ARG=${LVX_CSW:-}
+NOTE=${NOTE:-}
 ALLOW_DIRTY=${ALLOW_DIRTY:-0}
 
 while [ $# -gt 0 ]; do
@@ -36,6 +38,7 @@ while [ $# -gt 0 ]; do
         --date)        DATE="$2"; shift 2 ;;
         --suite)       SUITES="$SUITES $2"; shift 2 ;;
         --csw)         CSW_ARG="$2"; shift 2 ;;
+        --note)        NOTE="$2"; shift 2 ;;
         --csw=*)       CSW_ARG="${1#--csw=}"; shift ;;
         --allow-dirty) ALLOW_DIRTY=1; shift ;;
         -h|--help)     sed -n '6,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -105,6 +108,12 @@ trap 'rm -f "$DEST/MANIFEST.new"; rmdir "$DEST" 2>/dev/null || true' EXIT
     # only when the sweep was taken from this same tree state; a back-dated
     # import may name revisions that postdate the numbers.
     printf 'provenance\t%s\n' "$PROVENANCE"
+    # provenance is computed from the trees as they are AT IMPORT, which is not
+    # always the state that produced the numbers: a tree can be edited after a
+    # sweep finishes. The field stays conservative -- a provenance field that
+    # errs toward distrust is the only kind worth having -- and a note carries
+    # the evidence for a reader who needs the difference.
+    [ -n "$NOTE" ] && printf 'note\t%s\n' "$NOTE"
     echo "#"
     echo "# component<TAB>sha<TAB>describe"
     # Benchmark suites: submodules of this repository.
