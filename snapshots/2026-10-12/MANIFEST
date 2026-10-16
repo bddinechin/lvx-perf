@@ -4,6 +4,7 @@ date	2026-10-12
 imported	2026-10-16T05:54:23Z
 host	Linux x86_64
 provenance	as-of-import
+note	PROVENANCE WARNING, added 2026-10-16: provenance=as-of-import means the component SHAs below were read when this snapshot was IMPORTED (2026-10-16), not when its numbers were measured (2026-10-12). They may name revisions that postdate the sweep, and must not be cited as the toolchain that produced these rows. The TSVs themselves are the sweeps lvx-mibench recorded on 2026-10-12; it is only the attribution that is unreliable.
 #
 # component<TAB>sha<TAB>describe
 lvx-csw	e9c33b86712da7da8388c2d7610bfd488386f7f4	e9c33b8

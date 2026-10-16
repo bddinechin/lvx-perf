@@ -115,6 +115,16 @@ trap 'rm -f "$DEST/MANIFEST.new"; rmdir "$DEST" 2>/dev/null || true' EXIT
     # the evidence for a reader who needs the difference.
     [ -n "$NOTE" ] && printf 'note\t%s\n' "$NOTE"
     echo "#"
+    if [ "$PROVENANCE" != exact ]; then
+        # The SHAs below were read now, not when the sweep ran. Say it HERE,
+        # next to them, rather than relying on a reader to look up what
+        # provenance=as-of-import implies -- a stamped SHA reads as a fact
+        # about the measurement, and for a back-dated import it is not one.
+        echo "# WARNING: provenance is $PROVENANCE -- the SHAs below were read at"
+        echo "# import time ($(date -u +%FT%TZ)), NOT when these numbers were measured"
+        echo "# ($DATE). They may name revisions that postdate the sweep. Do not cite"
+        echo "# them as the toolchain that produced these rows without checking."
+    fi
     echo "# component<TAB>sha<TAB>describe"
     # Benchmark suites: submodules of this repository.
     printf 'lvx-perf\t%s\n' "$(describe_at "$HERE" benchmark)"

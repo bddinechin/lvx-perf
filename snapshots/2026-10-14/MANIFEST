@@ -4,6 +4,7 @@ date	2026-10-14
 imported	2026-10-16T05:54:31Z
 host	Linux x86_64
 provenance	as-of-import
+note	PROVENANCE WARNING, added 2026-10-16: the component SHAs below were read at IMPORT time (2026-10-16T05:54Z), not when these numbers were measured (2026-10-14), which is what provenance=as-of-import means. They do NOT describe the toolchain that produced these rows -- in particular lvx-gcc 5a94149d36d postdates the sweep by two days. What IS established: the polybench TSVs here were committed in lvx-polybench 2c6e419 at 2026-10-14 17:18:52, which PREDATES all three of the vector-comparison codegen commits -- d8f0d20606b (2026-10-14 22:14:59), cf86aae166e (10-15) and 127ff2d12aa (10-16). So this snapshot is a sound "before" for that change set, and snapshots/2026-10-16 is the "after"; it is only the recorded SHAs that are wrong, not the numbers.
 #
 # component<TAB>sha<TAB>describe
 lvx-csw	e9c33b86712da7da8388c2d7610bfd488386f7f4	e9c33b8
