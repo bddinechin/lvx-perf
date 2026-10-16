@@ -190,7 +190,19 @@ carry a comment carries the three-line SPDX header; the Markdown documents and
 SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 ```
 
-The imported TSVs are measurements of third-party benchmark suites, and the
-suites keep their own terms in their own repositories: PolyBench/C is
-GPL-licensed upstream, MiBench ships under its own academic terms. Measuring a
-program does not relicense it, and no benchmark source is redistributed here.
+That covers this repository's own files — the tools, the documents, and the
+snapshot TSVs, which are measurements rather than derived source.
+
+**The submodules are separate repositories under their own terms**, which this
+repository does not alter:
+
+| Suite | Upstream license |
+|---|---|
+| `lvx-polybench` | Ohio State University Software Distribution License (permissive, BSD-family) |
+| `lvx-ssw` | MIT |
+| `lvx-mibench` | No single upstream license: a pristine import of the UMich group tarballs, whose constituent programs — jpeg, ispell, blowfish, rijndael — each carry their own terms. Check the individual program before reusing its source. |
+
+Each suite's `harness/` is project-authored and shares its repository's terms;
+`lvx-polybench/harness/guest-output.py` is also kept in `lvx-csw/validation/`,
+where it is the same project-authored file under that repository's Apache-2.0
+WITH LLVM-exception header.
