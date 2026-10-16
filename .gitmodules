@@ -12,3 +12,4 @@
 	path = lvx-ssw
 	url = git@github.com:bddinechin/lvx-ssw.git
 	branch = lvx-ssw
+	update = merge

@@ -168,7 +168,7 @@ that guess resolve to `lvx-perf`, which has no compiler in it at all.
 Both are dependency-free — bash and Python 3, no packages to install.
 
 ```bash
-./sync-submodules.sh                       # after cloning, and after a pull
+./sync-from-work.sh                        # after cloning, and to pick up another machine's work
 echo /path/to/lvx-csw > lvx-csw.path       # once per machine; see below
 ./bin/lvx-csw-path --check                 # is it there, and is it built?
 
@@ -257,7 +257,7 @@ dropped, so the day it starts building shows up in the series.
 lvx-polybench/          submodule: the suites and their harnesses, where
 lvx-mibench/              sweeps are run and results/ is written
 lvx-ssw/
-sync-submodules.sh      init/update the submodules, on their branches
+sync-from-work.sh       pull, and update the submodules on their branches
 lvx-csw.path            where lvx-csw is on this machine (not committed)
 bin/lvx-csw-path        resolve/check lvx-csw; owns the resolution chain
 bin/lvx-perf-import     snapshot the suites' results/, with provenance
@@ -270,8 +270,15 @@ Clone it with the suites:
 
 ```bash
 git clone --recurse-submodules git@github.com:bddinechin/lvx-perf.git
-cd lvx-perf && ./sync-submodules.sh
+cd lvx-perf && ./sync-from-work.sh
 ```
+
+Use `./sync-from-work.sh` rather than `git pull && git submodule update`
+whenever you switch machines. It leaves every suite on its branch rather than a
+detached HEAD, which matters here because sweeps commit their results into the
+suites. It also stops before merging if a suite's branch was rebased elsewhere,
+and touches nothing it cannot sync without losing work. `lvx-csw` carries the
+same script.
 
 ## Provenance
 
