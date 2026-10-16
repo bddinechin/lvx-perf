@@ -8,6 +8,7 @@
   ./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double
   ./bin/lvx-perf-trend --suite mibench --config lvx-2-O2 --metric cycles
   ./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double --only gemm,syrk
+  ./bin/lvx-perf-trend --suite ssw --config lvx-2-O2
 
 Rows are benchmarks, columns are snapshot dates, and the last column is the
 change from the first measurement to the latest. A cell is blank where that
@@ -28,15 +29,25 @@ ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOTS = ROOT / "snapshots"
 
 # The harness names the benchmark column differently per suite.
-KEY_COLUMNS = ("kernel", "benchmark")
-DEFAULT_METRIC = {"polybench": "kernel_cycles", "mibench": "cycles"}
+KEY_COLUMNS = ("kernel", "benchmark", "bench")
+# lvx-ssw's headline is cycles per cell update, not raw cycles: it is the
+# quantity that compares to a published GCUPS figure with the clock divided
+# out, and its two benchmarks run different cell counts.
+DEFAULT_METRIC = {
+    "polybench": "kernel_cycles",
+    "mibench": "cycles",
+    "ssw": "cycles_per_cell",
+}
 
 
 def is_correct(value):
-    """PolyBench/MiBench correctness verdicts that permit scoring.
+    """Correctness verdicts that permit scoring.
 
-    'noref' means upstream shipped no reference output -- the run is real but
-    unchecked, so it is kept and flagged rather than silently scored.
+    'noref' means no reference output was shipped or generated -- the run is
+    real but unchecked, so it is kept and flagged rather than silently scored.
+    'static' (lvx-ssw) is a build-only row with no cycles at all, and the fp-*
+    classes are PolyBench/MiBench floating-point last-place drift, which an
+    integer kernel never reports.
     """
     return value == "ok" or value.startswith("fp-")
 
@@ -109,6 +120,15 @@ def main():
             sys.exit("not measured in any snapshot: " + ", ".join(sorted(unknown)))
         names = [n for n in names if n in wanted]
 
+    # Cycle counts are large integers and want thousands separators; a derived
+    # ratio like cycles_per_cell is near 1-10, where "%.0f" would quantise the
+    # entire measurement away -- 2.850 and 11.386 printed as 3 and 11. Decide
+    # from the data rather than from a list of metric names, so a new derived
+    # metric formats correctly without being registered anywhere.
+    allv = [v for rows in per_date.values() for (v, _) in rows.values()]
+    small = bool(allv) and max(abs(v) for v in allv) < 1000
+    fmt = (lambda v: f"{v:,.3f}") if small else (lambda v: f"{v:,.0f}")
+
     width = max([len(n) for n in names] + [len("benchmark")])
     cols = [max(len(d), 12) for d in dates]
     header = "benchmark".ljust(width) + "  " + "  ".join(
@@ -127,7 +147,7 @@ def main():
             else:
                 value = entry[0]
                 series.append(value)
-                cells.append(f"{value:,.0f}".rjust(w))
+                cells.append(fmt(value).rjust(w))
         # Compare first measured against last measured, not first against
         # first column: a benchmark added later still has a usable series.
         if len(series) >= 2 and series[0]:

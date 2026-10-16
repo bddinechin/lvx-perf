@@ -41,16 +41,27 @@ snapshot is immutable, dated, and names every revision behind it.
 |---|---|---|
 | `lvx-polybench/` | `main` | PolyBench/C 4.2.1-beta: 30 affine dense-FP loop nests, no input, no I/O, no syscalls. Did the vectorizer and the scheduler do their job. Cheap to sweep — minutes. |
 | `lvx-mibench/` | `main` | MiBench: 13 integer, control-flow-heavy applications — jpeg, ispell, blowfish, dijkstra. Portability and realism; exercises the C library, the ABI and `argv`. Tens of minutes to hours. |
-| `lvx-ssw/` | `lvx-ssw` | Striped Smith-Waterman: real-world bioinformatics, *entirely* SIMD integer, over SIMDe's SSE2. The LVX-2 SIMD instrument. |
+| `lvx-ssw/` | `lvx-ssw` | Smith-Waterman, **two algorithm shapes**: striped (Farrar, dominated by a data-dependent early exit) and inter-sequence (Rognes/SWIPE, no branch in the inner loop). Real-world bioinformatics, entirely SIMD integer, over SIMDe's SSE2. The LVX-2 SIMD instrument. |
 
 Each is pristine upstream in its first commit, so `git log` in a suite is the
 complete list of what porting required, and each carries its own `GAPS.md` and
 `harness/README.md` for the metrics and the traps.
 
-`lvx-ssw` is run by `lvx-ssw/lvx/run-lvx.sh` and is **self-checking rather than
-tabular** — it emits no `results/*.tsv` yet, so `lvx-perf-import` reports it as
-skipped and there is nothing to trend. Giving it a TSV harness is the obvious
-next job here.
+`lvx-ssw` carries **two benchmarks in one suite**, tracked as separate rows:
+`striped` and `inter`. They are not a speed contest with each other — different
+algorithms with different ceilings — but a compiler change can move one and not
+the other, which is the reason to have both. Measured 2026-10-16 on lvx-2 at
+`-O2`, striped runs 11.386 cycles per cell update and inter-sequence 2.850, a
+4.0× difference that is almost entirely the striped kernel's lazy-F fix-up loop
+and its data-dependent early exit.
+
+That pairing exists because of what PolyBench showed the same day: a breadth
+gate can be completely blind to a change. The vector-comparison work left all
+240 PolyBench kernel-measurements codegen-identical, because those kernels use
+comparisons in scalar control flow and never as vector values. **Coverage of
+different shapes matters more than more kernels of one shape**, and the two SSW
+benchmarks differ in exactly the dimension that mattered there — one is
+branch-dominated, the other has no branch in its inner loop at all.
 
 Both measure **cycles under the gem5 ISS, not wall-clock time**. The ISS is
 deterministic, so the same ELF yields the same count on any host: no averaging,
@@ -147,7 +158,7 @@ echo /path/to/lvx-csw > lvx-csw.path       # once per machine; see below
 # Run a sweep, in the suite's own submodule
 cd lvx-polybench && ./harness/run.sh && cd ..
 cd lvx-mibench   && ./harness/run.sh && cd ..
-cd lvx-ssw       && ./lvx/run-lvx.sh && cd ..
+cd lvx-ssw       && ./harness/run.sh && cd ..
 
 # Snapshot whatever the suites currently have in results/
 ./bin/lvx-perf-import
@@ -157,7 +168,9 @@ CSW=/path/to/lvx-csw ./bin/lvx-perf-import
 # Read one metric back across every snapshot that measured it
 ./bin/lvx-perf-trend --suite mibench   --config lvx-2-O2
 ./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double
-./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double \
+./bin/lvx-perf-trend --suite ssw       --config lvx-2-O2
+./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double
+./bin/lvx-perf-trend --suite ssw       --config lvx-2-O2 \
                      --metric bundles_dyn --only gemm,syrk,2mm
 ```
 

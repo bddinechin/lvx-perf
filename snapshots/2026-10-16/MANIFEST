@@ -1,21 +1,21 @@
 # LVX performance snapshot -- provenance for the TSVs beside this file.
 # Written by bin/lvx-perf-import; edit only to add a note= line.
 date	2026-10-16
-imported	2026-10-16T07:07:19Z
+imported	2026-10-16T08:13:30Z
 host	Linux x86_64
 provenance	unreproducible-dirty-tree
-note	PolyBench re-measurement after the lvx-gcc vector-comparison change: no regression. 240 kernel-measurements (30 kernels x 2 cores x 2 FP widths x +/-restrict) are codegen-identical to the 2026-10-14 baseline -- kernel_cycles, kernel_insns, simd_insns and scalar_fma all 0/30 changed, correctness verdicts identical, nothing beyond 2%. Only whole-program static size moved: +12 instructions on lvx-2, exactly constant across all 30 kernels, 0 on lvx-1, so it is vector code in the linked common code rather than kernel codegen, with no cycle effect. Toolchain measured is lvx-csw c86af24 / lvx-gcc 127ff2d12aa: the installed lvx-mbr-gcc was built 08:33:50 and its mtime was unchanged across the whole sweep (finished 09:03:52), so one fixed compiler produced every row. The -dirty flags below are a timing artifact, not a provenance defect: the only modified file, lvx-gcc gcc/config/lvx/lvx.cc, was edited at 09:05:37, after the build AND after the sweep, so it is provably not in the measured binary. Codegen verified functionally before measuring: a==b is one compnwq.eq, a<b one compnwq.lt, float a<b one fcompnwq.olt, a<7 one compnwq.le with no makedp.
+note	Adds the first ssw rows to the series: lvx-ssw gained a TSV harness and a second benchmark. striped 11.386 cycles/cell, inter-sequence 2.850 -- a 4.0x difference that is almost entirely the striped kernel lazy-F fix-up loop and its data-dependent early exit. Both correctness-gated twice: each driver self-checks (inter against a scalar Gotoh oracle sharing no intrinsic with the vector kernel), then the harness checks the printed checksum against harness/reference-checksums.tsv, which is generated from the NATIVE x86 builds so it can detect a target miscompile rather than perpetuate one. The polybench rows are the same re-measurement as before, unchanged. Toolchain measured is lvx-csw c86af24 / lvx-gcc 127ff2d12aa, one compiler binary throughout; the -dirty flags are a timing artifact, the only modified file being lvx-gcc gcc/config/lvx/lvx.cc, edited after both the build and the sweeps. lvx-1 is not yet measured for ssw: the scalar core scalarises all sixteen lanes and the run had not finished.
 #
 # component<TAB>sha<TAB>describe
-lvx-perf	3266fec5f0857c4cda38ee94b59ec163a014a17b	3266fec-dirty
+lvx-perf	cc8269f7037be22628c2f33c830cd43818b377d1	cc8269f-dirty
 lvx-mibench	740a7d50f2616601cc3b8d5cb2200848c5ace92e	740a7d5
 lvx-polybench	370642abbdd287e3c30e1ca0a1f181fa42c2177e	370642a
-lvx-ssw	4215eaa7c89844ef805be79dd3bbea5ff5488f99	4215eaa
+lvx-ssw	1b28950761099027f3dfe8949bea9de023101b08	1b28950
 # toolchain read from /home/bd3/lvx-csw (located via default sibling)
-lvx-csw	c86af24d5bd5ffad8bfb8111bb30fff2d0ddd387	c86af24-dirty
+lvx-csw	948cd4086d6b5fa901e2cc76bc09fedb2829c095	948cd40-dirty
 lvx-mds	0d521b8d9c4731c8e305879c450d7b24bc0835cd	0d521b8
 lvx-binutils	d921aa145505513a71abd5bcb893ef5752cb948e	d921aa14
-lvx-gcc/gcc	127ff2d12aa18f3669cd5d797beaef269aa4fa4d	basepoints/gcc-17-2145-g127ff2d12aa-dirty
+lvx-gcc/gcc	127ff2d12aa18f3669cd5d797beaef269aa4fa4d	basepoints/gcc-17-2145-g127ff2d12aa
 lvx-llvm/llvm-project	b8e05f20688ec1b364fb4bee2b40da81e71e649f	b8e05f20688e
 lvx-gem5	c97b2f6fa6ac3dc9fc0dc899c171f910dac318d0	v25.1.0.0-107-gc97b2f6fa6
 lvx-newlib	078f5248c2b751682cb237b5d33029929a82ef23	078f524
