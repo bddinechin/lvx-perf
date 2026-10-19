@@ -30,3 +30,30 @@ silently patched cell destroys it.
 `MANIFEST` may gain a `note<TAB><text>` line by hand; that is the one edit
 that is welcome, and the place to record what changed in the toolchain and why
 a jump in the numbers is expected.
+
+## The ISS CPU model is not uniform across suites
+
+A cycle column means different things in different suites here, and until
+2026-10-19 nothing recorded which:
+
+| suite | `LVX_CPU` | what its cycles are |
+|---|---|---|
+| `ssw` | `minor` (its harness sets it) | pipeline timing — comparable to published figures |
+| `polybench` | unset → gem5 default `atomic` | **functional counts, not timing** |
+| `mibench` | unset → gem5 default `atomic` | **functional counts, not timing** |
+
+So an `ssw` cycles/cell must never be set beside a `polybench` one, and a
+comparison of two sweeps is only valid if both used the same model. `ssw` rows
+now carry a `cpu_model` column; the other two suites do not, and their
+committed history predates the question.
+
+This is not a theoretical hazard. A MiBench sweep taken under `minor` against a
+committed series taken under `atomic` reads as a uniform 60–240% regression,
+with `bundles_dyn` flat because executed bundle count is a property of the code.
+That pattern was initially diagnosed here as the ISS's timing work landing
+between two dates — a plausible reading of the evidence, and wrong. `atomic`
+reproduced the committed figure to 0.2%.
+
+The MANIFEST pins `lvx-gem5`, which catches a *simulator* change. It does not
+pin `LVX_CPU`, which is what catches a *model* change, and the model change is
+the larger effect.
