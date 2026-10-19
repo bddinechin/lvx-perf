@@ -9,6 +9,7 @@
   ./bin/lvx-perf-trend --suite mibench --config lvx-2-O2 --metric cycles
   ./bin/lvx-perf-trend --suite polybench --config lvx-2-O2-mini-double --only gemm,syrk
   ./bin/lvx-perf-trend --suite ssw --config lvx-2-O2
+  ./bin/lvx-perf-trend --suite turbopfor --config lvx-2-O2
   ./bin/lvx-perf-trend --suite polybench --config lvx-2-clang-O2-mini-double
 
 Rows are benchmarks, columns are snapshot dates, and the last column is the
@@ -29,8 +30,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOTS = ROOT / "snapshots"
 
-# The harness names the benchmark column differently per suite.
-KEY_COLUMNS = ("kernel", "benchmark", "bench", "config")
+# What identifies a ROW differs per suite, and for one of them it is not a
+# single column. turbopfor emits config x codec x width within one TSV -- the
+# same codec at three widths, the same width under three build configs -- so
+# keying on `config' alone would collapse six rows into three and silently
+# report whichever came last.
+#
+# Only genuinely row-identifying columns belong here. arch, opt, dataset and
+# type are also present but constant within a TSV (they are in its filename),
+# so including them would add noise to every label.
+KEY_COLUMNS = {
+    "polybench": ("kernel",),
+    "mibench":   ("benchmark",),
+    "ssw":       ("bench",),
+    "turbopfor": ("config", "codec", "width"),
+}
+# For a suite not listed, fall back to the first single column that exists --
+# enough for any harness that follows the one-row-per-benchmark convention.
+FALLBACK_KEYS = ("kernel", "benchmark", "bench", "config")
 # lvx-ssw's headline is cycles per cell update, not raw cycles: it is the
 # quantity that compares to a published GCUPS figure with the clock divided
 # out, and its two benchmarks run different cell counts.
@@ -38,10 +55,6 @@ DEFAULT_METRIC = {
     "polybench": "kernel_cycles",
     "mibench": "cycles",
     "ssw": "cycles_per_cell",
-    # turbopfor rows are keyed by config but one config holds several rows
-    # (codec x width), so the key column alone does not identify a row. Pass
-    # --metric and read the TSV directly for that suite until the tool grows a
-    # composite key; cycles_per_int is the headline either way.
     "turbopfor": "cycles_per_int",
 }
 
@@ -58,18 +71,25 @@ def is_correct(value):
     return value == "ok" or value.startswith("fp-")
 
 
-def read_tsv(path, metric):
-    """-> (rows: {benchmark: (value, verdict)}, missing_metric: bool)"""
+def read_tsv(path, metric, suite):
+    """-> (rows: {row-label: (value, verdict)}, missing_metric: bool)"""
     rows = {}
     with path.open(newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         if reader.fieldnames is None:
             return rows, True
-        key = next((c for c in KEY_COLUMNS if c in reader.fieldnames), None)
-        if key is None or metric not in reader.fieldnames:
+        wanted = KEY_COLUMNS.get(suite)
+        if wanted is not None:
+            keys = [c for c in wanted if c in reader.fieldnames]
+        else:
+            keys = [c for c in FALLBACK_KEYS if c in reader.fieldnames][:1]
+        if not keys or metric not in reader.fieldnames:
             return rows, True
         for row in reader:
-            name = (row.get(key) or "").strip()
+            # Joined with "/" so a composite label reads as one name and sorts
+            # by config then codec then width, which is the order a reader
+            # wants to compare in.
+            name = "/".join((row.get(k) or "").strip() for k in keys).strip("/")
             raw = (row.get(metric) or "").strip()
             if not name or not raw:
                 continue
@@ -102,7 +122,7 @@ def main():
         tsv = snap / args.suite / f"{args.config}.tsv"
         if not tsv.is_file():
             continue
-        rows, bad_header = read_tsv(tsv, metric)
+        rows, bad_header = read_tsv(tsv, metric, args.suite)
         if bad_header:
             skipped.append(f"{snap.name}: no '{metric}' column")
             continue

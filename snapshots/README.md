@@ -57,3 +57,25 @@ reproduced the committed figure to 0.2%.
 The MANIFEST pins `lvx-gem5`, which catches a *simulator* change. It does not
 pin `LVX_CPU`, which is what catches a *model* change, and the model change is
 the larger effect.
+
+## What identifies a row differs per suite
+
+`bin/lvx-perf-trend` keys rows on different columns depending on the suite, and
+for one of them a single column is not enough:
+
+| suite | row key |
+|---|---|
+| `polybench` | `kernel` |
+| `mibench` | `benchmark` |
+| `ssw` | `bench` |
+| `turbopfor` | `config` / `codec` / `width` |
+
+`turbopfor` emits the same codec at several widths and the same width under
+several build configs within one TSV, so keying on `config` alone would
+collapse six rows into three and silently report whichever came last. Composite
+labels are joined with `/` and sort config-then-codec-then-width, which is the
+order a reader compares in.
+
+`arch`, `opt`, `dataset` and `type` are deliberately **not** part of any key:
+they are constant within a TSV, being encoded in its filename, so including
+them would add the same noise to every label.
