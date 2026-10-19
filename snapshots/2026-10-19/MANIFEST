@@ -1,0 +1,22 @@
+# LVX performance snapshot -- provenance for the TSVs beside this file.
+# Written by bin/lvx-perf-import; edit only to add a note= line.
+date	2026-10-19
+imported	2026-10-19T16:35:42Z
+host	Linux x86_64
+provenance	unreproducible-dirty-tree
+note	First turbopfor rows: integer bit-packing, the fourth benchmark shape, measuring ONE source tree through three translation layers (plain C auto-vectorized by GCC, the SSE path via SIMDe 128-bit, the AVX2 path via SIMDe 256-bit onto a machine with no 256-bit datapath). The scalar row is the same source through the same compiler in all three configs and agrees to under 1% -- 1.668/1.655/1.659 and 1.779/1.787/1.780 cycles per integer -- which is the methodology control and should be read before any SIMD row. Two findings pulling opposite ways. bitn at 256 bits is 0.482 cycles/int against 0.666 at 128, 1.38x FASTER despite no 256-bit datapath, because a 256-bit op becomes a pair filling both ALU slots with the code unrolled by two: on a VLIW with spare slots the emulation buys ILP. But bitnd at 256 bits costs 104.220 cycles/int, 69x the 128-bit path and 58x scalar, because the AVX2 delta prefix-sum uses _mm256_permutevar8x32_epi32 and _mm256_permute2x128_si256 and LVX has no runtime-indexed permute at all. That independently confirms lvx-ssw inter-gather 14.2x for _mm_shuffle_epi8: two algorithms, two benchmarks, one missing instruction class, an lvx-mds question rather than a toolchain one. Practical rule: go wide for shift/mask/arithmetic, stay narrow for anything permuting. PROVENANCE: reads unreproducible-dirty-tree because lvx-csw lvx-gcc/gcc is dirty AT IMPORT -- the other session is working in it. The rows were produced by the installed lvx-mbr-gcc built from ddb027f279a, with no backend source newer than that binary when measured. Each row also carries cpu_model=minor in the TSV, so the model is recorded per row rather than left to gem5 default atomic.
+#
+# component<TAB>sha<TAB>describe
+lvx-perf	52b6dc032ecab3bae661aba20f7bb469184b2721	52b6dc0-dirty
+lvx-mibench	01cf3feb49d7e7453b6c0a1e6ffb49c725ac154c	01cf3fe
+lvx-polybench	6efb2c09a4e79a67fe1e19b3a007eb0f76e5e19c	6efb2c0
+lvx-ssw	54ad377c78056702e94c4db3b63e7a9b6a7a5c18	54ad377
+lvx-turbopfor	9fd63c0a557711b87402f1974fd568eb92131c74	9fd63c0
+# toolchain read from /home/bd3/lvx-csw (located via default sibling)
+lvx-csw	618724b4b7b620ccd6b5ca430023ff8a556a2ab5	618724b-dirty
+lvx-mds	a53538ee68a5bae5e6c35a0fe2fed798b7ecdc37	a53538e
+lvx-binutils	d921aa145505513a71abd5bcb893ef5752cb948e	d921aa14
+lvx-gcc/gcc	ddb027f279ac97b9bdaf2bd2392b988cfe9367b3	basepoints/gcc-17-2169-gddb027f279a
+lvx-llvm/llvm-project	860696b06f057a84add4073f576362dbca683b52	860696b06f05
+lvx-gem5	782dc5f1c0348f856fa91e2c365b5e83649a3bcf	v25.1.0.0-127-g782dc5f1c0
+lvx-newlib	078f5248c2b751682cb237b5d33029929a82ef23	078f524

@@ -41,7 +41,7 @@ snapshot is immutable, dated, and names every revision behind it.
 |---|---|---|
 | `lvx-polybench/` | `main` | PolyBench/C 4.2.1-beta: 30 affine dense-FP loop nests, no input, no I/O, no syscalls. Did the vectorizer and the scheduler do their job. Cheap to sweep — minutes. |
 | `lvx-mibench/` | `main` | MiBench: 13 integer, control-flow-heavy applications — jpeg, ispell, blowfish, dijkstra. Portability and realism; exercises the C library, the ABI and `argv`. Tens of minutes to hours. |
-| `lvx-turbopfor/` | `lvx-turbopfor` | TurboPFor integer compression: bit-packing, delta and zigzag over packed integers. The **bit-manipulation** shape — shift/mask/add/or — which no other suite here reaches. Also the only suite with 128-bit *and* 256-bit implementations of the same codec, so it measures the back end's `OI`-mode pairing. |
+| `lvx-turbopfor/` | `lvx-turbopfor` | TurboPFor integer compression: bit-packing and delta over packed integers. The **bit-manipulation** shape — shift/mask/add/or — which no other suite reaches. Uniquely, it measures **one source tree through three translation layers**: plain C that GCC auto-vectorizes, SIMDe's 128-bit lowering, and SIMDe's 256-bit lowering onto a 128-bit machine. |
 | `lvx-ssw/` | `lvx-ssw` | Smith-Waterman, **three rows**: striped (Farrar, dominated by a data-dependent early exit), inter-sequence (Rognes/SWIPE, no branch in the inner loop), and the same inter-sequence kernel fetching scores through `_mm_shuffle_epi8` to price the ISA's missing byte gather. Real-world bioinformatics, entirely SIMD integer, over SIMDe's SSE2. The LVX-2 SIMD instrument. |
 
 Each is pristine upstream in its first commit, so `git log` in a suite is the
@@ -67,13 +67,29 @@ two rows converge the day such an instruction lands, and until then 14.2× is
 the figure the argument for adding one needs — a per-cell cost in a real
 kernel, not 22 instructions in a microbenchmark.
 
-`lvx-turbopfor` adds a fourth shape and is worth reading for one correction it
-records: **LVX-2 has no 256-bit datapath.** 256-bit vectors are legal and lower
-to *pairs* of 128-bit operations (`addwq addwq`) — two instructions for twice
-the data, no overhead and no gain. So its `__AVX2__` paths measure `OI`-mode
-register allocation and scheduling, not a wide datapath. It also found an
-`lvx-gcc` ICE within minutes of first compiling, before measuring anything; its
-decode side builds at `-O2` today and the encode side waits on that fix.
+`lvx-turbopfor` adds a fourth shape, and its first results answer a question
+the other suites cannot: **what does a wider SIMD width than the machine has
+actually cost?** LVX-2 has no 256-bit datapath — 256-bit vectors lower to pairs
+of 128-bit operations — and the answer turns out to depend entirely on what the
+code does:
+
+| | cycles/int | vs 128-bit |
+|---|---|---|
+| `bitn` (shift/mask) at 256 | **0.482** | **1.38× faster** |
+| `bitnd` (delta, permutes) at 256 | **104.220** | **69× slower** |
+
+Going wide *pays* for straight-line integer work: the emulated pair fills both
+ALU slots and the code is effectively unrolled by two, so on a VLIW with spare
+slots the emulation buys instruction-level parallelism. But the delta path's
+prefix sum uses `_mm256_permutevar8x32_epi32`, and LVX has **no runtime-indexed
+permute at all** — which is the same missing instruction class `lvx-ssw`'s
+`inter-gather` row prices at 14.2×. Two algorithms, two benchmarks, one ISA gap.
+
+The practical rule — **go wide for shift/mask/arithmetic, stay narrow for
+anything that permutes** — is available from neither row alone.
+
+It also found an `lvx-gcc` ICE within minutes of first compiling, before
+measuring anything, since fixed in `ddb027f279a`.
 
 That multi-row shape is the clearest illustration of why this repository
 tracks shapes rather than kernel counts. The same suite now distinguishes a

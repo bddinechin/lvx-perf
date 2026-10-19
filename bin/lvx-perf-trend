@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOTS = ROOT / "snapshots"
 
 # The harness names the benchmark column differently per suite.
-KEY_COLUMNS = ("kernel", "benchmark", "bench")
+KEY_COLUMNS = ("kernel", "benchmark", "bench", "config")
 # lvx-ssw's headline is cycles per cell update, not raw cycles: it is the
 # quantity that compares to a published GCUPS figure with the clock divided
 # out, and its two benchmarks run different cell counts.
@@ -38,6 +38,11 @@ DEFAULT_METRIC = {
     "polybench": "kernel_cycles",
     "mibench": "cycles",
     "ssw": "cycles_per_cell",
+    # turbopfor rows are keyed by config but one config holds several rows
+    # (codec x width), so the key column alone does not identify a row. Pass
+    # --metric and read the TSV directly for that suite until the tool grows a
+    # composite key; cycles_per_int is the headline either way.
+    "turbopfor": "cycles_per_int",
 }
 
 
