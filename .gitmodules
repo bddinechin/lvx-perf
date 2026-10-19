@@ -13,3 +13,8 @@
 	url = git@github.com:bddinechin/lvx-ssw.git
 	branch = lvx-ssw
 	update = merge
+[submodule "lvx-turbopfor"]
+	path = lvx-turbopfor
+	url = git@github.com:bddinechin/lvx-turbopfor.git
+	branch = lvx-turbopfor
+	update = merge

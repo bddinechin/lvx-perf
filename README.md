@@ -41,6 +41,7 @@ snapshot is immutable, dated, and names every revision behind it.
 |---|---|---|
 | `lvx-polybench/` | `main` | PolyBench/C 4.2.1-beta: 30 affine dense-FP loop nests, no input, no I/O, no syscalls. Did the vectorizer and the scheduler do their job. Cheap to sweep — minutes. |
 | `lvx-mibench/` | `main` | MiBench: 13 integer, control-flow-heavy applications — jpeg, ispell, blowfish, dijkstra. Portability and realism; exercises the C library, the ABI and `argv`. Tens of minutes to hours. |
+| `lvx-turbopfor/` | `lvx-turbopfor` | TurboPFor integer compression: bit-packing, delta and zigzag over packed integers. The **bit-manipulation** shape — shift/mask/add/or — which no other suite here reaches. Also the only suite with 128-bit *and* 256-bit implementations of the same codec, so it measures the back end's `OI`-mode pairing. |
 | `lvx-ssw/` | `lvx-ssw` | Smith-Waterman, **three rows**: striped (Farrar, dominated by a data-dependent early exit), inter-sequence (Rognes/SWIPE, no branch in the inner loop), and the same inter-sequence kernel fetching scores through `_mm_shuffle_epi8` to price the ISA's missing byte gather. Real-world bioinformatics, entirely SIMD integer, over SIMDe's SSE2. The LVX-2 SIMD instrument. |
 
 Each is pristine upstream in its first commit, so `git log` in a suite is the
@@ -66,7 +67,15 @@ two rows converge the day such an instruction lands, and until then 14.2× is
 the figure the argument for adding one needs — a per-cell cost in a real
 kernel, not 22 instructions in a microbenchmark.
 
-That three-row shape is also the clearest illustration of why this repository
+`lvx-turbopfor` adds a fourth shape and is worth reading for one correction it
+records: **LVX-2 has no 256-bit datapath.** 256-bit vectors are legal and lower
+to *pairs* of 128-bit operations (`addwq addwq`) — two instructions for twice
+the data, no overhead and no gain. So its `__AVX2__` paths measure `OI`-mode
+register allocation and scheduling, not a wide datapath. It also found an
+`lvx-gcc` ICE within minutes of first compiling, before measuring anything; its
+decode side builds at `-O2` today and the encode side waits on that fix.
+
+That multi-row shape is the clearest illustration of why this repository
 tracks shapes rather than kernel counts. The same suite now distinguishes a
 branch-dominated kernel, a throughput kernel, and a kernel bottlenecked on one
 missing instruction — and a toolchain change can move any one of them without
