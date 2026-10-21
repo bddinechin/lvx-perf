@@ -266,7 +266,7 @@ same runtime (crt0, newlib, libgloss, libgcc and `lvx-sim.ld` are lvx-gcc's),
 so a GCC/clang difference is a code-generation difference.
 
 Which core clang can target depends on the machine description `lvx-csw`
-installed into lvx-llvm, not on `-mcpu`: since 2026-10-16 that is `lvx_v2`,
+installed into lvx-llvm, not on `-mcpu`: since 2026-10-16 that is `lvx_2`,
 on which `-mcpu=lvx-1` is **unsupported** — the vectorizer still emits lvx-2
 instructions, and some programs then fail to assemble or compute a wrong
 answer. Sweep clang on lvx-2 only unless `lvx-llvm/CLAUDE.md` says otherwise;
