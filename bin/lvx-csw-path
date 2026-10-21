@@ -115,8 +115,8 @@ else
     printf '  absent   %-28s %s\n' "clang (COMPILER=clang)" "$CSW/lvx-toolchain/bin/lvx-mbr-clang"
 fi
 report "assembler"          "$CSW/lvx-toolchain/bin/lvx-mbr-as"
-report "ISS, lvx-1"          "$CSW/lvx-gem5/build/gem5-lvx1.opt"
-report "ISS, lvx-2"          "$CSW/lvx-gem5/build/gem5-lvx2.opt"
+report "ISS, lvx-1"          "$CSW/lvx-gem5/build/gem5-lvx-1.opt"
+report "ISS, lvx-2"          "$CSW/lvx-gem5/build/gem5-lvx-2.opt"
 report "ISS run config"      "$CSW/lvx-gem5/tests/lvx/run_lvx.py"
 report "linker scripts"      "$CSW/lvx-newlib/libgloss/lvx-mbr/linker_scripts"
 report "SIMDe (lvx-ssw)"     "$CSW/lvx-simde/simde/x86/sse2.h"
