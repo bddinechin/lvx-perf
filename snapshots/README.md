@@ -109,13 +109,34 @@ than assuming turned a large-looking number into a small one:
 | `tsvc.c:2239` `/1.9` | yes | 2 widen/narrow per iteration, and the loop (`s2102`) carries a real cross-iteration dependence so it does not vectorise either way |
 | `common.c:139`, `:143` | **no** — `initialise_arrays` | outside the measurement |
 
-**Left unchanged deliberately.** The one site with measurable cost saves two
-instructions per iteration in a loop that cannot vectorise, and changing any of
-them alters the arithmetic — `1. / x` rounds once in double, `(real_t)1. / x`
-rounds in float — which changes every committed checksum, `common.c:139` being
-the array initialiser that feeds all 151 loops. Invalidating the whole
-reference set for two instructions is the wrong trade; recording it so the next
-reader does not re-derive it is the right one.
+**Fixed on 2026-10-22 (lvx-tsvc2 `7111ef3`), and the fix changes nothing
+measurable** — which is worth recording because this entry previously argued
+against making it, on two predictions that both turned out false.
+
+The argument was that changing the arithmetic would invalidate every checksum
+(`common.c:139` being the initialiser feeding all 151 loops) for a gain of two
+instructions per iteration. Measured:
+
+| | result |
+|---|---|
+| checksums changed, float | **0 of 151** |
+| checksums changed, double | **0 of 151** |
+| `tsvc.c` instructions | 10257 → **10257** |
+| `tsvc.c` SIMD instructions | 609 → **609** |
+
+Identical in both FP modes. `1.0/x` computed in double and rounded once to
+float gives the same float as the float division — IEEE division is correctly
+rounded and double rounding differs only on a tie, which `1/n` for n ≤ 32000
+does not produce. And GCC's front end already narrows
+`float op double_constant` when the constant is exactly representable
+(`shorten_binary_op`, `shorten_compare`), so there was no widen/narrow to
+remove. The two-instruction figure came from a hand-reduced version of the
+loop, and reducing it changed what was being measured.
+
+The casts are kept for reasons that are not performance: they state the intent,
+match upstream's convention in 49 other places, clear the scanner so a future
+real finding is not buried in known noise, and do not depend on a front-end
+narrowing another compiler need not perform.
 
 The scanner is committed so the check is repeatable rather than a one-off, and
 its header lists what it deliberately does not flag — explicit casts, whole
