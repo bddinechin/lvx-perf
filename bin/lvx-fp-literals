@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+# Part of the LVX project, under the Apache License v2.0 with LLVM Exceptions.
+# See LICENSE.TXT in the root of this repository for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+"""Find floating-point literals that are DOUBLE in single-precision code.
+
+    ./bin/lvx-fp-literals lvx-tsvc2/src/*.c
+    find lvx-polybench -name '*.c' | xargs ./bin/lvx-fp-literals
+
+In C a bare 1.0 is a double, so `floatvar * 1.0' promotes the whole expression
+to double: a widen/narrow pair at best, and it can suppress vectorisation. In a
+suite whose element type is a macro -- TSVC's real_t, PolyBench's DATA_TYPE --
+the literal silently pins the arithmetic to double even in the float build.
+
+WHAT IT DELIBERATELY DOES NOT FLAG, because each is converted once at compile
+time and costs nothing at runtime:
+
+  (real_t)1.0        an explicit cast on the literal itself
+  x = 1.0;           the whole right side of an assignment or initialiser
+  f(..., 1.0)        a complete function argument, converted per the prototype
+
+That last rule matters more than it sounds: without it TSVC reports 133 hits,
+of which 124 are the `dummy(a,b,c,d,e,aa,bb,cc, 0.)' that closes every one of
+its 151 loops. With it, four.
+
+AND A FINDING IS NOT AUTOMATICALLY A BUG. A double literal in genuinely double
+code is correct. Check the surrounding type before acting: lvx-mibench reports
+~660 and declares 644 floats against 522 doubles, so most of its hits are
+correct as written. Verify, then measure, then change -- in that order.
+
+
+The literal is safe when it is:
+  - suffixed f/F                      1.0f
+  - immediately preceded by a cast    (real_t)1.0, (float)1.0
+  - the entire right side of an assignment or initialiser, where the
+    conversion happens once at compile time
+  - a complete function argument, converted to the parameter type at the call
+Anything else in an arithmetic or comparison context costs a widen/narrow pair
+at best, and can suppress vectorisation entirely.
+"""
+import re, sys, pathlib
+
+LIT = re.compile(r'(?<![A-Za-z0-9_.])(?:\d+\.\d*|\.\d+|\d+\.?\d*[eE][-+]?\d+)(?![A-Za-z0-9_.])')
+CAST_BEFORE = re.compile(r'\(\s*(?:real_t|float|DATA_TYPE)\s*\)\s*$')
+# A plain assignment/initialiser: the literal is the whole RHS.
+PLAIN_ASSIGN = re.compile(r'=\s*-?$')
+# A whole function argument. With a prototype in scope the conversion to the
+# parameter type happens at compile time, so this is as safe as an assignment
+# -- and it is the overwhelming majority of hits in TSVC, where every one of
+# the 151 loops ends with dummy(a,b,c,d,e,aa,bb,cc, 0.).
+ARG_BEFORE = re.compile(r'[(,]\s*-?$')
+ARG_AFTER  = re.compile(r'^\s*[,)]')
+
+def strip_comments(text):
+    """Blank comments out IN PLACE, preserving newlines.
+
+    Replacing a /* ... */ spanning several lines with a single space collapses
+    them and shifts every line number after it -- which it did, by 22 lines,
+    making the reported locations wrong while the findings were right."""
+    def blank(m):
+        return re.sub(r'[^\n]', ' ', m.group(0))
+    text = re.sub(r'/\*.*?\*/', blank, text, flags=re.S)
+    text = re.sub(r'//[^\n]*', '', text)
+    # String and char literals too: "VN:1.4" and "-n1k=100.000" are text, not
+    # arithmetic, and counting them produced three false positives per suite.
+    text = re.sub(r'"(?:[^"\\\n]|\\.)*"', lambda m: '""', text)
+    text = re.sub(r"'(?:[^'\\\n]|\\.)*'", "''", text)
+    return text
+
+def scan(path):
+    try:
+        src = strip_comments(pathlib.Path(path).read_text(errors='replace'))
+    except Exception:
+        return []
+    out = []
+    for lineno, line in enumerate(src.split('\n'), 1):
+        if re.match(r'\s*#\s*(include|define|if|elif)', line):
+            continue
+        for m in LIT.finditer(line):
+            if m.group(0).endswith(('f', 'F')):
+                continue
+            before = line[:m.start()]
+            after = line[m.end():]
+            if CAST_BEFORE.search(before):
+                continue                     # (real_t)1.0 -- safe
+            if PLAIN_ASSIGN.search(before.rstrip()) and re.match(r'\s*[;,)]', after):
+                continue                     # x = 1.0;    -- safe
+            if ARG_BEFORE.search(before) and ARG_AFTER.match(after):
+                continue                     # f(..., 1.0) -- safe
+            out.append((lineno, m.group(0), line.strip()[:80]))
+    return out
+
+for path in sys.argv[1:]:
+    hits = scan(path)
+    if hits:
+        print(f"{path}: {len(hits)} unsafe")
+        for ln, lit, txt in hits[:6]:
+            print(f"    {ln}: {lit:>10}   {txt}")
+        if len(hits) > 6:
+            print(f"    ... {len(hits)-6} more")

@@ -79,3 +79,46 @@ order a reader compares in.
 `arch`, `opt`, `dataset` and `type` are deliberately **not** part of any key:
 they are constant within a TSV, being encoded in its filename, so including
 them would add the same noise to every label.
+
+## Single-precision literals: checked 2026-10-22, and mostly a non-issue
+
+`bin/lvx-fp-literals` scans for floating-point literals that are `double` in
+single-precision code — a bare `1.0` promotes `floatvar * 1.0` to double, which
+costs a widen/narrow pair and can suppress vectorisation. In a suite whose
+element type is a macro (`real_t`, `DATA_TYPE`) it silently pins the arithmetic
+to double even in the float build.
+
+Result across the suites:
+
+| suite | flagged | assessment |
+|---|---|---|
+| `lvx-tsvc2` | 4 | the only suite where it could matter; see below |
+| `lvx-polybench` | 8 | all in `init_array` and the timer — the kernels use `SCALAR_VAL` (62 uses), so the timed code is type-aware |
+| `lvx-ssw` | 2 | upstream's CLI driver, genuinely double (`log()` arithmetic); not on the benchmark path |
+| `lvx-turbopfor` | 27 | `round()` and timers, genuinely double |
+| `lvx-mibench` | ~660 | 644 float declarations against 522 double: mixed by design, spread thin across lout/tiff/rsynth, none an FP hot path |
+
+**TSVC's upstream authors were careful**, which is the main finding: they used
+49 explicit `(real_t)` casts rather than `f` suffixes, which is equivalent and
+type-correct for both widths. Four sites escaped, and measuring each rather
+than assuming turned a large-looking number into a small one:
+
+| site | in the timed region | measured |
+|---|---|---|
+| `tsvc.c:1631` `if (a[i] > 0.)` | yes | **nothing** — identical codegen, 44 insns and 9 SIMD either way; GCC narrows the comparison |
+| `tsvc.c:2239` `/1.9` | yes | 2 widen/narrow per iteration, and the loop (`s2102`) carries a real cross-iteration dependence so it does not vectorise either way |
+| `common.c:139`, `:143` | **no** — `initialise_arrays` | outside the measurement |
+
+**Left unchanged deliberately.** The one site with measurable cost saves two
+instructions per iteration in a loop that cannot vectorise, and changing any of
+them alters the arithmetic — `1. / x` rounds once in double, `(real_t)1. / x`
+rounds in float — which changes every committed checksum, `common.c:139` being
+the array initialiser that feeds all 151 loops. Invalidating the whole
+reference set for two instructions is the wrong trade; recording it so the next
+reader does not re-derive it is the right one.
+
+The scanner is committed so the check is repeatable rather than a one-off, and
+its header lists what it deliberately does not flag — explicit casts, whole
+assignments, and complete function arguments. That last rule is what separates
+a useful result from a useless one: without it TSVC reports 133 hits, 124 of
+them the `dummy(..., 0.)` that closes every loop.
