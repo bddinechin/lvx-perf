@@ -44,6 +44,10 @@ KEY_COLUMNS = {
     "mibench":   ("benchmark",),
     "ssw":       ("bench",),
     "turbopfor": ("config", "codec", "width"),
+    # tsvc2 emits one row per loop per vectorizer setting within a TSV, so the
+    # loop name alone would collapse the vec/novec pair -- which is the pair
+    # the suite exists to measure.
+    "tsvc2":     ("loop", "vec"),
 }
 # For a suite not listed, fall back to the first single column that exists --
 # enough for any harness that follows the one-row-per-benchmark convention.
@@ -56,6 +60,7 @@ DEFAULT_METRIC = {
     "mibench": "cycles",
     "ssw": "cycles_per_cell",
     "turbopfor": "cycles_per_int",
+    "tsvc2":     "cycles",
 }
 
 

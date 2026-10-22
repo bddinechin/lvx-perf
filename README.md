@@ -41,6 +41,7 @@ snapshot is immutable, dated, and names every revision behind it.
 |---|---|---|
 | `lvx-polybench/` | `main` | PolyBench/C 4.2.1-beta: 30 affine dense-FP loop nests, no input, no I/O, no syscalls. Did the vectorizer and the scheduler do their job. Cheap to sweep — minutes. |
 | `lvx-mibench/` | `main` | MiBench: 13 integer, control-flow-heavy applications — jpeg, ispell, blowfish, dijkstra. Portability and realism; exercises the C library, the ABI and `argv`. Tens of minutes to hours. |
+| `lvx-tsvc2/` | `lvx-tsvc2` | TSVC_2, the Test Suite for Vectorizing Compilers: 151 loops written to probe what a vectorizer can and cannot do. The **vectorization** instrument — it builds each loop with and without the vectorizer and reports the per-loop ratio, which is the question no other suite here asks. Also the **modulo-scheduling** instrument, carrying the symbolic distances, coupled recurrences and wrap-around scalars PolyBench lacks, plus a compile-only CMS/SMS dependence probe. |
 | `lvx-turbopfor/` | `lvx-turbopfor` | TurboPFor integer compression: bit-packing and delta over packed integers. The **bit-manipulation** shape — shift/mask/add/or — which no other suite reaches. Uniquely, it measures **one source tree through three translation layers**: plain C that GCC auto-vectorizes, SIMDe's 128-bit lowering, and SIMDe's 256-bit lowering onto a 128-bit machine. |
 | `lvx-ssw/` | `lvx-ssw` | Smith-Waterman, **three rows**: striped (Farrar, dominated by a data-dependent early exit), inter-sequence (Rognes/SWIPE, no branch in the inner loop), and the same inter-sequence kernel fetching scores through `_mm_shuffle_epi8` to price the ISA's missing byte gather. Real-world bioinformatics, entirely SIMD integer, over SIMDe's SSE2. The LVX-2 SIMD instrument. |
 
@@ -90,6 +91,23 @@ anything that permutes** — is available from neither row alone.
 
 It also found an `lvx-gcc` ICE within minutes of first compiling, before
 measuring anything, since fixed in `ddb027f279a`.
+
+`lvx-tsvc2` adds a fifth shape and the only one that measures the **vectorizer
+itself** rather than a kernel's throughput. Its first result is not a timing
+figure but a census: across all 151 loops, 5747 CMS dependence arcs over 428
+graphs, and **not one arc with ω > 1**, with `reg-raw` at 75%. That settles at
+suite scale what `lvx-csw`'s handoff had inferred from two loops tested by
+hand — GCC absorbs small-distance array recurrences into register rotations and
+uses two base pointers for large ones — so the advice *not* to add loops hoping
+to reach `LVX_CMS_MAX_DELTA` now rests on measurement. That machinery is
+reached by `#pragma omp simd safelen(n)` instead.
+
+It also found an `lvx-gcc` ICE about five minutes after first compiling: a
+vectorized float reciprocal under `-ffast-math` on lvx-2, dying unrecognized at
+RTL pass `vregs`. Narrowing it to one of eight arch × fpmode × type
+combinations is what located the cause, and it is fixed in `cb624ee8122`. Two
+suites in a row have now found a back-end bug before producing a single
+performance number, which is an argument for breadth of *shape* on its own.
 
 That multi-row shape is the clearest illustration of why this repository
 tracks shapes rather than kernel counts. The same suite now distinguishes a
