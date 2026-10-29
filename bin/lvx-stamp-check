@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Verify that result TSVs were produced by the revisions a MANIFEST records.
+
+SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+    lvx-stamp-check --manifest snapshots/2026-10-29/MANIFEST results/*.tsv
+    lvx-stamp-check --manifest MANIFEST --csw ~/lvx-csw results/*.tsv
+
+Exit status, which is the whole interface:
+
+    0  every TSV carries a stamp and every stamp agrees -- `exact' is earned
+    1  a stamp DISAGREES, or changed mid-sweep: these numbers were not
+       produced by the recorded revisions, and the snapshot must not claim
+       they were
+    2  nothing to check -- no TSV carries a stamp, so the claim is
+       unverifiable rather than false
+
+The distinction between 1 and 2 is the point. A snapshot that is wrong and a
+snapshot that is merely unproven need different words, and before
+bin/lvx-rev-stamp existed every snapshot was case 2 while being labelled
+`exact' -- because `exact' was computed from --date against the clock, which
+says nothing about which compiler ran.
+
+Findings print one per line as KIND<TAB>file<TAB>detail.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+
+# A stamp column, and the MANIFEST component it must agree with.
+#
+# cc_mtime maps to nothing: no SHA can verify a binary's mtime, and that is
+# exactly why it is recorded. A toolchain reinstalled in place from an
+# uncommitted tree leaves every SHA untouched, so the mtime is the only thing
+# that moves. It is still checked for consistency across a sweep below.
+COMPONENT = {
+    "csw_rev": "lvx-csw",
+    "gcc_rev": "lvx-gcc/gcc",
+    "gem5_rev": "lvx-gem5",
+}
+STAMP_COLUMNS = tuple(COMPONENT) + ("cc_mtime",)
+
+
+def read_manifest(path):
+    """component -> full sha, from the tab-separated body."""
+    out = {}
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 2 and parts[1]:
+                out[parts[0]] = parts[1]
+    return out
+
+
+def agrees(stamped, recorded):
+    """Does a short, possibly -dirty stamp name the recorded revision?
+
+    A `-dirty' stamp can never agree: it says tracked files differed from the
+    revision it names, so the revision does not identify what ran.
+    """
+    if not stamped or stamped == "unknown" or not recorded:
+        return None                      # nothing to compare, not a failure
+    if stamped.endswith("-dirty"):
+        return False
+    return recorded.startswith(stamped)
+
+
+def check_tsv(path, manifest):
+    """Findings for one TSV. Empty list means it verified."""
+    findings = []
+    with open(path, encoding="utf-8") as fh:
+        header = fh.readline().rstrip("\n").split("\t")
+        if not any(c in header for c in STAMP_COLUMNS):
+            return [("UNSTAMPED", path, "no revision columns")]
+        idx = {c: header.index(c) for c in STAMP_COLUMNS if c in header}
+        seen = {}
+        for lineno, line in enumerate(fh, start=2):
+            row = line.rstrip("\n").split("\t")
+            for col, i in idx.items():
+                if i >= len(row):
+                    continue
+                value = row[i]
+                if col not in seen:
+                    seen[col] = value
+                elif seen[col] != value:
+                    # Two rows of one sweep disagree, so no single revision
+                    # produced this file. This is the toolchain-reinstalled-
+                    # mid-sweep case, which a once-per-sweep stamp cannot see.
+                    findings.append((
+                        "INCONSISTENT", path,
+                        "%s changed within the sweep: %s (first row) vs %s (line %d)"
+                        % (col, seen[col], value, lineno)))
+                    seen[col] = value
+
+    for col, component in COMPONENT.items():
+        if col not in seen:
+            continue
+        recorded = manifest.get(component, "")
+        verdict = agrees(seen[col], recorded)
+        if verdict is False:
+            findings.append((
+                "MISMATCH", path,
+                "%s is %s but the manifest records %s as %s"
+                % (col, seen[col], component, recorded[:11] or "<nothing>")))
+    return findings
+
+
+def newer_components(csw, tsv_paths, manifest):
+    """Components whose HEAD postdates every TSV -- for unstamped files only.
+
+    Weak evidence by design: an mtime survives a `cp -p' and is rewritten by a
+    checkout, so this never fails an import on its own. It exists to turn "we
+    cannot verify this" into "and here is a specific reason to doubt it".
+    """
+    if not csw or not tsv_paths:
+        return []
+    newest = max(os.path.getmtime(p) for p in tsv_paths)
+    out = []
+    for component in COMPONENT.values():
+        repo = csw if component == "lvx-csw" else os.path.join(csw, component)
+        if not os.path.exists(os.path.join(repo, ".git")):
+            continue
+        try:
+            when = int(subprocess.run(
+                ["git", "-C", repo, "log", "-1", "--format=%ct", "HEAD"],
+                capture_output=True, text=True, check=True).stdout.strip())
+        except (subprocess.CalledProcessError, ValueError, OSError):
+            continue
+        if when > newest:
+            out.append((component, manifest.get(component, "")[:11],
+                        int(when - newest) // 3600))
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("--manifest", required=True)
+    ap.add_argument("--csw", default="")
+    ap.add_argument("tsv", nargs="*")
+    args = ap.parse_args()
+
+    manifest = read_manifest(args.manifest)
+    tsvs = [p for p in args.tsv if os.path.isfile(p)]
+    if not tsvs:
+        return 2
+
+    findings, unstamped = [], []
+    for path in tsvs:
+        got = check_tsv(path, manifest)
+        findings.extend(f for f in got if f[0] != "UNSTAMPED")
+        unstamped.extend(f[1] for f in got if f[0] == "UNSTAMPED")
+
+    for kind, path, detail in findings:
+        print("%s\t%s\t%s" % (kind, path, detail))
+
+    if findings:
+        return 1
+    if unstamped:
+        for path in unstamped:
+            print("UNSTAMPED\t%s\tno revision columns" % path)
+        for component, sha, hours in newer_components(args.csw, unstamped, manifest):
+            print("NEWER\t%s\t%s is at %s, committed %dh after the newest "
+                  "unstamped result" % (args.manifest, component, sha, hours))
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

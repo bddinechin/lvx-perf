@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+#
+# The revisions that define a measurement, as TSV columns.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Usage:
+#   lvx-rev-stamp --tsv-header            # the column names
+#   lvx-rev-stamp --tsv-row [--csw PATH]  # the values, same order
+#
+# A harness calls both and pastes them into its header and its rows, so a
+# number carries the toolchain that produced it. ONE script owns both halves
+# deliberately: a harness that spelled the header itself would drift from the
+# row on the next column added, and a shifted field is the kind of bug that
+# reads as data rather than failing (lvx-tsvc2's cms-probe.sh shipped exactly
+# that once, a printf whose arguments slid by one).
+#
+# Why these four:
+#
+#   csw_rev   The superproject pin, which names every component at once -- but
+#             only if its gitlinks are current, so it cannot stand alone.
+#   gcc_rev   Codegen. The reason this file exists: lvx-gcc moved twice in one
+#             evening across a run of pipeliner and register-allocator fixes,
+#             and the `toolchain' version string (17.0.0 20260627) did not
+#             change through any of it. A baked version date cannot carry
+#             provenance.
+#   gem5_rev  Cycles. A timing-model change rescaled lvx-ssw by 4.002x with an
+#             identical checksum -- the numbers stayed plausible and became
+#             incomparable, which is the worst way for a record to break.
+#   cc_mtime  The installed binary's mtime, because no SHA catches a toolchain
+#             reinstalled in place from an uncommitted tree. That happened
+#             during lvx-kernels' first sweep, between two of four
+#             configurations.
+#
+# A `-dirty' suffix means tracked files differed from the revision named.
+# `unknown' means it could not be determined -- a standalone checkout with no
+# superproject, say -- and is deliberately not an error: a harness must still
+# run, it just cannot promise provenance, and lvx-perf-import is the thing
+# that refuses to call an unverifiable sweep exact.
+set -u
+
+COLUMNS="csw_rev	gcc_rev	gem5_rev	cc_mtime"
+
+mode= CSW_ARG=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --tsv-header) mode=header; shift ;;
+        --tsv-row)    mode=row; shift ;;
+        --csw)        CSW_ARG="${2:?--csw needs a path}"; shift 2 ;;
+        --csw=*)      CSW_ARG="${1#--csw=}"; shift ;;
+        -h|--help)    sed -n '3,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)            echo "lvx-rev-stamp: unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+[ -n "$mode" ] || { echo "lvx-rev-stamp: need --tsv-header or --tsv-row" >&2; exit 2; }
+
+if [ "$mode" = header ]; then
+    printf '%s\n' "$COLUMNS"
+    exit 0
+fi
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+CSW=
+if [ -n "$CSW_ARG" ]; then
+    CSW=$CSW_ARG
+elif resolved=$("$HERE/bin/lvx-csw-path" ${CSW_ARG:+--csw "$CSW_ARG"} 2>/dev/null); then
+    CSW=$resolved
+fi
+
+# Short SHA plus a -dirty marker, or `unknown'. Never fails: an unresolvable
+# component is a weaker record, not a dead harness.
+rev_of() {
+    local repo=$1 sha
+    [ -n "$repo" ] && [ -e "$repo/.git" ] || { printf 'unknown'; return; }
+    sha=$(git -C "$repo" rev-parse --short HEAD 2>/dev/null) || { printf 'unknown'; return; }
+    [ -n "$(git -C "$repo" status --porcelain 2>/dev/null | head -1)" ] && sha="$sha-dirty"
+    printf '%s' "$sha"
+}
+
+cc_mtime_of() {
+    local cc=$1
+    [ -x "$cc" ] || { printf 'unknown'; return; }
+    date -r "$cc" +%Y-%m-%dT%H:%M:%S 2>/dev/null || printf 'unknown'
+}
+
+printf '%s\t%s\t%s\t%s\n' \
+    "$(rev_of "$CSW")" \
+    "$(rev_of "${CSW:+$CSW/lvx-gcc/gcc}")" \
+    "$(rev_of "${CSW:+$CSW/lvx-gem5}")" \
+    "$(cc_mtime_of "${CSW:+$CSW/lvx-toolchain/bin/lvx-mbr-gcc}")"

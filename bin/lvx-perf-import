@@ -11,6 +11,7 @@
 #   ./bin/lvx-perf-import --seq 2            # a second sweep the same day
 #   ./bin/lvx-perf-import --suite polybench
 #   ./bin/lvx-perf-import --note 'why this snapshot is what it is'
+#   ./bin/lvx-perf-import --allow-stale   # record stale SHAs anyway
 #   ./bin/lvx-perf-import --csw /path/to/lvx-csw
 #   LVX_CSW=/path/to/lvx-csw ./bin/lvx-perf-import
 #
@@ -23,6 +24,26 @@
 # deterministic, so the same ELF gives the same cycle count forever; a number
 # only means something next to the compiler that emitted it. That is what
 # MANIFEST carries, and why import refuses to run against a dirty input tree.
+#
+# provenance values, worst to best:
+#
+#   stale-toolchain          A TSV names revisions other than the ones
+#                            recorded, or names two across one sweep. The
+#                            numbers were NOT produced by the stamped
+#                            toolchain. Refused unless --allow-stale.
+#   unreproducible-dirty-tree  An input tree was dirty, so no revision
+#                            identifies what ran. Refused unless --allow-dirty.
+#   unverified-stamp         No TSV records what it ran against, so the SHAs
+#                            are unproven. Never refused: every TSV written
+#                            before bin/lvx-rev-stamp is in this state.
+#   as-of-import             Back-dated: the SHAs were read now, not when the
+#                            sweep ran, and may postdate it.
+#   exact                    The trees are clean, the date is today, and every
+#                            TSV's own stamp agrees with what is recorded.
+#
+# `exact' once meant only that --date was today -- a fact about the clock, not
+# about the measurement. bin/lvx-rev-stamp and bin/lvx-stamp-check are what
+# make it a checkable claim.
 
 set -euo pipefail
 
@@ -33,6 +54,7 @@ SUITES=""
 CSW_ARG=${LVX_CSW:-}
 NOTE=${NOTE:-}
 ALLOW_DIRTY=${ALLOW_DIRTY:-0}
+ALLOW_STALE=0
 SEQ=
 
 while [ $# -gt 0 ]; do
@@ -43,8 +65,9 @@ while [ $# -gt 0 ]; do
         --note)        NOTE="$2"; shift 2 ;;
         --csw=*)       CSW_ARG="${1#--csw=}"; shift ;;
         --allow-dirty) ALLOW_DIRTY=1; shift ;;
+        --allow-stale) ALLOW_STALE=1; shift ;;
         --seq)         SEQ="$2"; shift 2 ;;
-        -h|--help)     sed -n '6,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)     sed -n '6,46p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)             echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -187,6 +210,65 @@ if dirty_inputs | grep -q .; then
     fi
     sed -i 's/^provenance\t.*/provenance\tunreproducible-dirty-tree/' "$DEST/MANIFEST.new"
 fi
+
+# Provenance by evidence rather than by the clock.
+#
+# `exact' used to be decided by `[ "$DATE" = "$(date +%F)" ]' alone -- a fact
+# about the clock, which says nothing about which compiler ran. A sweep taken
+# in the morning and imported that evening earned `exact' across a toolchain
+# that had turned over twice in between, and no column could have shown it:
+# the `toolchain' string (17.0.0 20260627) is a baked version date that
+# survives any number of rebuilds. bin/lvx-rev-stamp puts the revisions in the
+# TSV at measurement time, so the claim can now be checked instead of assumed.
+#
+# The source TSVs are read, not the copies: this runs before they are copied,
+# and they are identical anyway -- the copy below is verbatim.
+shopt -s nullglob
+stamp_tsvs=()
+for suite in $SUITES; do
+    stamp_tsvs+=("$HERE/lvx-$suite/results"/*.tsv)
+done
+shopt -u nullglob
+
+stamp_out=
+stamp_rc=0
+if [ ${#stamp_tsvs[@]} -gt 0 ]; then
+    stamp_out=$("$HERE/bin/lvx-stamp-check" --manifest "$DEST/MANIFEST.new" \
+                ${CSW:+--csw "$CSW"} "${stamp_tsvs[@]}") || stamp_rc=$?
+fi
+
+case $stamp_rc in
+0)  # Every stamp agreed. This is the only way `exact' is earned.
+    ;;
+1)  # A stamp disagrees, or changed mid-sweep. These numbers demonstrably were
+    # not produced by the revisions about to be recorded, so this refuses by
+    # default for the same reason a dirty input tree does: a snapshot whose
+    # SHAs are wrong is worse than no snapshot, because it reads as a fact.
+    if [ "$ALLOW_STALE" != 1 ]; then
+        echo "refusing to import: a result TSV names revisions other than the" >&2
+        echo "ones this snapshot would record, so the numbers were not produced" >&2
+        echo "by them:" >&2
+        printf '%s\n' "$stamp_out" | sed 's/^/    /' >&2
+        echo "Re-run the sweep against the current trees, or pass --allow-stale" >&2
+        echo "to record the snapshot as stale-toolchain." >&2
+        exit 1
+    fi
+    PROVENANCE=stale-toolchain
+    sed -i "s/^provenance\t.*/provenance\t$PROVENANCE/" "$DEST/MANIFEST.new"
+    ;;
+2)  # Nothing carried a stamp. Not false, just unproven -- every TSV written
+    # before bin/lvx-rev-stamp existed is in this state, which is why it never
+    # refuses. But it must not be called exact.
+    if [ "$PROVENANCE" = exact ]; then
+        PROVENANCE=unverified-stamp
+        sed -i "s/^provenance\t.*/provenance\t$PROVENANCE/" "$DEST/MANIFEST.new"
+    fi
+    echo "warning: no result TSV records the revisions it was measured against," >&2
+    echo "         so this snapshot's SHAs are unverified. Harnesses get them" >&2
+    echo "         from bin/lvx-rev-stamp; lvx-kernels is wired, the rest are not." >&2
+    printf '%s\n' "$stamp_out" | grep '^NEWER' | sed 's/^/         /' >&2 || true
+    ;;
+esac
 
 if [ -z "$CSW" ]; then
     echo "warning: no lvx-csw checkout found (see bin/lvx-csw-path); the" >&2
