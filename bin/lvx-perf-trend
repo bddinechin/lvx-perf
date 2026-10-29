@@ -125,10 +125,12 @@ def read_manifest(snap):
                 warned about.
       lvx-gem5  The ISS timing model, which decides every cycle count. A
                 change here can rescale a whole suite with the checksums
-                unmoved: lvx-ssw went from 2.850 to 0.712 cycles per cell,
-                exactly 4.002x, with identical checksum, acc and cell count.
-                Nothing in the numbers looks wrong, which is what makes it
-                worth a warning.
+                unmoved, and NOT by one factor. Re-measuring lvx-ssw across
+                one such change moved its three benchmarks by 2.42x, 3.12x
+                and 4.00x, every checksum identical -- so relative costs
+                changed, and the byte-gather penalty the suite exists to
+                price went from 14.2x to 18.3x. Nothing in the numbers looks
+                wrong, which is what makes it worth a warning.
     """
     out = {"provenance": "?", "lvx-gem5": "", "lvx-gcc/gcc": ""}
     path = snap / "MANIFEST"
@@ -224,8 +226,11 @@ def main():
               ", ".join(sorted(gem5)) + ").")
         print("           The ISS timing model decides every cycle count here, so a")
         print("           change between columns may be the model and not the code.")
-        print("           One such change rescaled lvx-ssw by 4.002x with the")
-        print("           checksum unmoved. Compare within one revision.")
+        print("           Measured: one such change rescaled lvx-ssw's three")
+        print("           benchmarks by 2.42x, 3.12x and 4.00x -- DIFFERENT factors,")
+        print("           every checksum unmoved. So it moves rankings, not just")
+        print("           magnitudes: the byte-gather penalty read 14.2x before and")
+        print("           18.3x after. Compare within one revision.")
     if len(gcc) > 1:
         print("  note: lvx-gcc differs across these columns (" +
               ", ".join(sorted(gcc)) + ") -- expected, and usually the point.")
