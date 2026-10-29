@@ -266,7 +266,10 @@ case $stamp_rc in
     echo "warning: no result TSV records the revisions it was measured against," >&2
     echo "         so this snapshot's SHAs are unverified. Harnesses get them" >&2
     echo "         from bin/lvx-rev-stamp; lvx-kernels is wired, the rest are not." >&2
-    printf '%s\n' "$stamp_out" | grep '^NEWER' | sed 's/^/         /' >&2 || true
+    # Print the detail only: the KIND and the path are for a caller parsing
+    # the output, and the path on a NEWER line names this manifest rather than
+    # any result file, which would read as though the manifest were at fault.
+    printf '%s\n' "$stamp_out" | awk -F'\t' '$1 == "NEWER" { print "         " $3 }' >&2
     ;;
 esac
 

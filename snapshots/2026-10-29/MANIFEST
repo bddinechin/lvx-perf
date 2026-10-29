@@ -1,0 +1,24 @@
+# LVX performance snapshot -- provenance for the TSVs beside this file.
+# Written by bin/lvx-perf-import; edit only to add a note= line.
+date	2026-10-29
+imported	2026-10-29T08:46:41Z
+host	Linux x86_64
+provenance	exact
+note	First lvx-kernels snapshot, and the first snapshot anywhere here with VERIFIED provenance: every row carries csw_rev/gcc_rev/gem5_rev/cc_mtime from bin/lvx-rev-stamp, and bin/lvx-stamp-check confirmed each against this MANIFEST, so provenance=exact is a checked claim rather than a statement that --date was today. Re-measured against lvx-gcc d5d98a0e698 after the 10-28 evening pipeliner and register-allocator bumps; every measured column is byte-identical to the fc71d2d185c-era sweep, so those fixes changed nothing for these three kernels.
+#
+# component<TAB>sha<TAB>describe
+lvx-perf	f2c52ebf30fe8eb0a3da48a7a29b00751d789579	f2c52eb-dirty
+lvx-kernels	fc016b04d274591755667c4fa9d9366bd6fa085c	fc016b0
+lvx-mibench	93e3a0540ed71096a62b9bf33029637ffa4ce20e	93e3a05
+lvx-polybench	07170223b24a07765d6d0fa099f53f23e2bd535e	0717022
+lvx-ssw	26537e83bf010b7aea4d05c10eaf91d070255d97	26537e8
+lvx-turbopfor	6a4f3fd58031ab9c2ef2c5a54d54136bdc2d98c4	6a4f3fd
+lvx-tsvc2	f425bb8dc18c7c7bd83c248b3aa8931632604e1c	f425bb8
+# toolchain read from /home/bd3/lvx-csw (located via default sibling)
+lvx-csw	7b013af7b7c28c2d87317825762b5887fffc2d4a	7b013af
+lvx-mds	1368ed9f687735619c895b669af56b74806e392d	1368ed9
+lvx-binutils	342cce3b97f039e8a30e784921f46241bd00d4c3	342cce3b
+lvx-gcc/gcc	d5d98a0e698de295d2a7c584a6ae20edc9ede1d9	basepoints/gcc-17-2259-gd5d98a0e698
+lvx-llvm/llvm-project	4ed968dc1f84d3c2e003fbea7b8e571c01f5a464	4ed968dc1f84
+lvx-gem5	099523f2cfb25a0b0214e0577f40d86d3fe5a115	v25.1.0.0-138-g099523f2cf
+lvx-newlib	078f5248c2b751682cb237b5d33029929a82ef23	078f524

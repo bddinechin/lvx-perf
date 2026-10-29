@@ -113,6 +113,40 @@ def read_tsv(path, metric, suite):
     return rows, False
 
 
+def read_manifest(snap):
+    """The provenance line, and the revisions that decide comparability.
+
+    A trend puts numbers from different days in one table, which silently
+    assumes they measure the same thing. Two revisions decide whether they do,
+    and they are not alike:
+
+      lvx-gcc   Codegen. A change here is usually the POINT -- the column is
+                there to show what the compiler did -- so it is reported, not
+                warned about.
+      lvx-gem5  The ISS timing model, which decides every cycle count. A
+                change here can rescale a whole suite with the checksums
+                unmoved: lvx-ssw went from 2.850 to 0.712 cycles per cell,
+                exactly 4.002x, with identical checksum, acc and cell count.
+                Nothing in the numbers looks wrong, which is what makes it
+                worth a warning.
+    """
+    out = {"provenance": "?", "lvx-gem5": "", "lvx-gcc/gcc": ""}
+    path = snap / "MANIFEST"
+    if not path.is_file():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            continue
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) < 2:
+            continue
+        if parts[0] == "provenance":
+            out["provenance"] = parts[1]
+        elif parts[0] in ("lvx-gem5", "lvx-gcc/gcc"):
+            out[parts[0]] = parts[1][:10]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("--suite", required=True, help="polybench | mibench")
@@ -173,6 +207,30 @@ def main():
         d.rjust(w) for d, w in zip(dates, cols)) + "  " + "change".rjust(9)
     print(f"{args.suite}/{args.config}  metric={metric}  "
           f"(lower is better, {len(dates)} snapshot(s))\n")
+
+    # What the columns were measured with, before the numbers that invite
+    # comparing them. A trend table is the one place a provenance field has to
+    # be read, because putting two snapshots side by side is the claim that
+    # they are commensurable.
+    manifests = {d: read_manifest(SNAPSHOTS / d) for d in dates}
+    unproven = [d for d in dates if manifests[d]["provenance"] != "exact"]
+    if unproven:
+        print("  provenance: " + ", ".join(
+            f"{d} {manifests[d]['provenance']}" for d in unproven))
+    gem5 = {manifests[d]["lvx-gem5"] for d in dates if manifests[d]["lvx-gem5"]}
+    gcc = {manifests[d]["lvx-gcc/gcc"] for d in dates if manifests[d]["lvx-gcc/gcc"]}
+    if len(gem5) > 1:
+        print("  WARNING: lvx-gem5 differs across these columns (" +
+              ", ".join(sorted(gem5)) + ").")
+        print("           The ISS timing model decides every cycle count here, so a")
+        print("           change between columns may be the model and not the code.")
+        print("           One such change rescaled lvx-ssw by 4.002x with the")
+        print("           checksum unmoved. Compare within one revision.")
+    if len(gcc) > 1:
+        print("  note: lvx-gcc differs across these columns (" +
+              ", ".join(sorted(gcc)) + ") -- expected, and usually the point.")
+    if unproven or len(gem5) > 1 or len(gcc) > 1:
+        print()
     print(header)
     print("-" * len(header))
 
