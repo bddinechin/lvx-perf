@@ -48,6 +48,12 @@ KEY_COLUMNS = {
     # loop name alone would collapse the vec/novec pair -- which is the pair
     # the suite exists to measure.
     "tsvc2":     ("loop", "vec"),
+    # kernels runs one program per TSV, so `kernel' is constant in the file and
+    # stays out by the rule above.  What varies is the 2x2 cross the suite
+    # exists to measure, and both halves have to be in the key: FALLBACK_KEYS
+    # would have found the constant `kernel' and collapsed all four rows onto
+    # one label.
+    "kernels":   ("spec", "vec"),
 }
 # For a suite not listed, fall back to the first single column that exists --
 # enough for any harness that follows the one-row-per-benchmark convention.
@@ -61,6 +67,7 @@ DEFAULT_METRIC = {
     "ssw": "cycles_per_cell",
     "turbopfor": "cycles_per_int",
     "tsvc2":     "cycles",
+    "kernels":   "cycles",
 }
 
 

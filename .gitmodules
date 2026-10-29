@@ -23,3 +23,6 @@
 	url = git@github.com:bddinechin/lvx-tsvc2.git
 	branch = lvx-tsvc2
 	update = merge
+[submodule "lvx-kernels"]
+	path = lvx-kernels
+	url = git@github.com:bddinechin/lvx-kernels.git
