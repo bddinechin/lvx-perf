@@ -6,6 +6,15 @@
 # Usage:
 #   lvx-rev-stamp --tsv-header            # the column names
 #   lvx-rev-stamp --tsv-row [--csw PATH]  # the values, same order
+#   lvx-rev-stamp --check [--csw PATH]    # is a sweep worth starting?
+#
+# --check answers the question a harness should ask BEFORE it measures, not
+# after: will these numbers be attributable? It exits non-zero when they will
+# not. It does not refuse anything -- measuring against your own dirty backend
+# to see whether a change helped is the normal development loop, and the right
+# thing to do -- but a sweep is minutes to hours, and learning afterwards that
+# every row says `-dirty' wastes all of it. Three independent row sets stamped
+# themselves unattributable in two days before this existed.
 #
 # A harness calls both and pastes them into its header and its rows, so a
 # number carries the toolchain that produced it. ONE script owns both halves
@@ -45,13 +54,14 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --tsv-header) mode=header; shift ;;
         --tsv-row)    mode=row; shift ;;
+        --check)      mode=check; shift ;;
         --csw)        CSW_ARG="${2:?--csw needs a path}"; shift 2 ;;
         --csw=*)      CSW_ARG="${1#--csw=}"; shift ;;
         -h|--help)    sed -n '3,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)            echo "lvx-rev-stamp: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
-[ -n "$mode" ] || { echo "lvx-rev-stamp: need --tsv-header or --tsv-row" >&2; exit 2; }
+[ -n "$mode" ] || { echo "lvx-rev-stamp: need --tsv-header, --tsv-row or --check" >&2; exit 2; }
 
 if [ "$mode" = header ]; then
     printf '%s\n' "$COLUMNS"
@@ -82,6 +92,54 @@ cc_mtime_of() {
     [ -x "$cc" ] || { printf 'unknown'; return; }
     date -r "$cc" +%Y-%m-%dT%H:%M:%S 2>/dev/null || printf 'unknown'
 }
+
+if [ "$mode" = check ]; then
+    rc=0
+    if [ -z "$CSW" ]; then
+        echo "lvx-csw: NOT FOUND (see bin/lvx-csw-path)"
+        echo "=> rows measured now will stamp \`unknown' and cannot be verified."
+        exit 1
+    fi
+    # Report each component, and say which ones are dirty. A dirty tree is the
+    # disqualifying state: bin/lvx-stamp-check treats a -dirty stamp as a
+    # disagreement, because the revision it names does not identify what ran.
+    for c in "" lvx-gcc/gcc lvx-gem5 lvx-mds; do
+        repo=${c:+$CSW/$c}; repo=${repo:-$CSW}
+        label=${c:-lvx-csw}
+        [ -e "$repo/.git" ] || { printf '  %-14s absent\n' "$label"; continue; }
+        sha=$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo unknown)
+        dirt=$(git -C "$repo" status --porcelain 2>/dev/null | wc -l)
+        if [ "$dirt" -gt 0 ]; then
+            printf '  %-14s %-13s DIRTY (%s file(s))\n' "$label" "$sha" "$dirt"
+            rc=1
+        else
+            printf '  %-14s %-13s clean\n' "$label" "$sha"
+        fi
+    done
+    # The installed binaries, because neither is a revision. A toolchain or an
+    # ISS copied into place leaves every SHA untouched, and the ISS binary in
+    # particular decides every cycle count. A recent mtime means a rebuild may
+    # still be in flight.
+    now=$(date +%s)
+    for b in lvx-toolchain/bin/lvx-mbr-gcc lvx-gem5/build/gem5-lvx-1.opt \
+             lvx-gem5/build/gem5-lvx-2.opt; do
+        f=$CSW/$b
+        [ -e "$f" ] || { printf '  %-14s absent: %s\n' installed "$b"; continue; }
+        t=$(date -r "$f" +%s 2>/dev/null) || continue
+        age=$(( (now - t) / 60 ))
+        warn=""
+        [ "$age" -lt 10 ] && { warn="  <-- rebuilt in the last 10 min; a build may be in flight"; rc=1; }
+        printf '  %-14s %s  (%sm ago)%s\n' installed "$(basename "$b")" "$age" "$warn"
+    done
+    if [ "$rc" = 0 ]; then
+        echo "=> provenance-clean: a sweep now can earn provenance=exact."
+    else
+        echo "=> NOT provenance-clean. Rows measured now will stamp \`-dirty' and"
+        echo "   bin/lvx-perf-import will refuse them. Fine for development; not"
+        echo "   for a series. Wait for the trees to settle, or accept it."
+    fi
+    exit $rc
+fi
 
 printf '%s\t%s\t%s\t%s\n' \
     "$(rev_of "$CSW")" \
