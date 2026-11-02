@@ -100,13 +100,30 @@ describe_at() {
     fi
     sha=$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo unknown)
     desc=$(git -C "$repo" describe --always 2>/dev/null || echo unknown)
+    # TRACKED modifications only, in both cases. The SHA recorded beside
+    # this describes tracked content at that revision; a modified tracked file
+    # makes the SHA a lie about the tree, which is what must gate an import.
+    # An untracked file does not: nothing references it, so it did not
+    # participate in the build. Treating it as dirt cost three days -- a stray
+    # `?? validation/run' in lvx-csw held bin/lvx-rev-stamp --check at DIRTY
+    # and blocked a campaign waiting for quiescence.
+    #
+    # It is still counted and recorded, in a fourth field, because an
+    # untracked source in a tree whose build globs WOULD participate. That is
+    # a judgement for a reader with the count in front of them, not something
+    # to decide here by refusing.
     if [ "$kind" = benchmark ]; then
-        dirt=$(git -C "$repo" status --porcelain -- . ':(exclude)results' 2>/dev/null | head -1)
+        dirt=$(git -C "$repo" status --porcelain --untracked-files=no -- . ':(exclude)results' 2>/dev/null | head -1)
     else
-        dirt=$(git -C "$repo" status --porcelain 2>/dev/null | head -1)
+        dirt=$(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null | head -1)
     fi
     [ -n "$dirt" ] && desc="$desc-dirty"
-    printf '%s\t%s\n' "$sha" "$desc"
+    untr=$(git -C "$repo" ls-files --others --exclude-standard 2>/dev/null | wc -l)
+    if [ "$untr" -gt 0 ]; then
+        printf '%s\t%s\tuntracked=%s\n' "$sha" "$desc" "$untr"
+    else
+        printf '%s\t%s\n' "$sha" "$desc"
+    fi
 }
 
 if [ "$DATE" = "$(date +%F)" ]; then

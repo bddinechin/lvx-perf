@@ -108,12 +108,22 @@ if [ "$mode" = check ]; then
         label=${c:-lvx-csw}
         [ -e "$repo/.git" ] || { printf '  %-14s absent\n' "$label"; continue; }
         sha=$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo unknown)
-        dirt=$(git -C "$repo" status --porcelain 2>/dev/null | wc -l)
+        # TRACKED modifications only. An untracked file does not change what
+        # the compiler was built from -- nothing references it -- so it must
+        # not gate a sweep. Counting it did: a stray `?? validation/run' in
+        # lvx-csw held this check at DIRTY for three days and blocked a
+        # campaign waiting on it. Untracked files are still reported, because
+        # a stray source file in a tree that globs would be a real risk, but
+        # they are a remark and not a verdict.
+        dirt=$(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null | wc -l)
+        untr=$(git -C "$repo" ls-files --others --exclude-standard 2>/dev/null | wc -l)
+        note=""
+        [ "$untr" -gt 0 ] && note="  (+$untr untracked, not gating)"
         if [ "$dirt" -gt 0 ]; then
-            printf '  %-14s %-13s DIRTY (%s file(s))\n' "$label" "$sha" "$dirt"
+            printf '  %-14s %-13s DIRTY (%s tracked)%s\n' "$label" "$sha" "$dirt" "$note"
             rc=1
         else
-            printf '  %-14s %-13s clean\n' "$label" "$sha"
+            printf '  %-14s %-13s clean%s\n' "$label" "$sha" "$note"
         fi
     done
     # The installed binaries, because neither is a revision. A toolchain or an
