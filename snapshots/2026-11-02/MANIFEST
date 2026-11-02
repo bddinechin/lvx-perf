@@ -1,0 +1,27 @@
+# LVX performance snapshot -- provenance for the TSVs beside this file.
+# Written by bin/lvx-perf-import; edit only to add a note= line.
+date	2026-11-02
+imported	2026-11-02T18:01:21Z
+host	Linux x86_64
+provenance	unverified-stamp
+note	Campaign against one pinned toolchain, launched automatically once bin/lvx-rev-stamp --check reported quiescent twice three minutes apart. Suites: ssw kernels polybench turbopfor tsvc2 mibench. Pin: 9bb45ab	ddb90ae5f68	81c61f43f8	2026-11-02T15:23:26.
+#
+# component<TAB>sha<TAB>describe
+lvx-perf	36d649452d8f4b402811485f8ca0a1bb3f9dbdfc	36d6494-dirty
+lvx-kernels	4bfa2ff8ff56340004d228d5027a51766e273531	4bfa2ff
+lvx-mibench	e6f0d1c044cbea8e2723dbee449f01068119d65b	e6f0d1c	untracked=1
+lvx-polybench	1111c34276c843850b1387e80bbf16a5d510e0bc	1111c34
+lvx-ssw	9ff28dfff9600d2ed6fa1782183dac29099ac29d	9ff28df
+lvx-turbopfor	7108fbcc169a2417de687b8e3752b0b008c46798	7108fbc
+lvx-tsvc2	2b149b832ad489980c285978eb14b2e5794a8a65	2b149b8	untracked=2
+# toolchain read from /home/bd3/lvx-csw (located via default sibling)
+lvx-csw	9bb45ab9e7489ba2b4b637bf484c1adfe2d0bcb2	9bb45ab	untracked=1
+lvx-mds	216a601f3f62b4e0061de42d977143cf4894ec21	216a601
+lvx-binutils	ca58a3f6f30045c81fd64c381ae12f8562700ad3	ca58a3f6
+lvx-gcc/gcc	ddb90ae5f68e06548961be3b107f43d50560e613	basepoints/gcc-17-2316-gddb90ae5f68
+lvx-llvm/llvm-project	4ed968dc1f84d3c2e003fbea7b8e571c01f5a464	4ed968dc1f84
+lvx-gem5	81c61f43f89a45b45e8512752b606570abb1d644	v25.1.0.0-148-g81c61f43f8
+lvx-newlib	078f5248c2b751682cb237b5d33029929a82ef23	078f524
+note	WHY provenance=unverified-stamp rather than exact: 6 of the 19 TSVs here carry no revision columns. They are polybench/lvx-1-O2-* and the *-restrict variants, which this sweep did not re-measure -- the harness's default config is lvx-2, MINI, float and double, non-restrict -- so those six files are October baselines copied through unchanged, and bin/lvx-stamp-check reports them 381 to 383 hours older than the revisions recorded above. The import copies every TSV in a suite's results/, not only the ones a sweep produced, which is why one partial re-measure downgrades the whole snapshot. That is the honest label: exact would have been a false claim about those six files. The OTHER 13 files hold 715 rows and every one of them carries this pin exactly, verified field by field -- csw_rev, gcc_rev, gem5_rev and cc_mtime all equal to the pin, zero rows off it.
+note	CORRECTNESS: tsvc2/lvx-2-O2-double-default-i1.tsv has 2 MISMATCH rows of 302, both of them loop s4115, in the vec AND novec arms, with the SAME checksum_bits 4607357212451529636 in both. The two arms therefore agree with each other and disagree with the native x86 oracle, which rules the vectorizer out: this is a reference-versus-target floating-point difference on double, read as MISMATCH because tsvc2 compares raw bit patterns rather than a tolerance. Every other row in both tsvc2 files is ok, and every other suite is ok throughout. Not treated as a performance result for s4115.
+note	ISS COMPARISON: these cycles are NOT comparable with any snapshot before 2026-11-02. lvx-gem5 moved c97b2f6fa6 -> 099523f2cf -> 81c61f43f8 since the October baselines. ssw against its committed October rows, with all three checksums identical: striped 11.386 -> 3.202 (3.556x), inter 2.850 -> 0.712 (4.003x), inter-gather 40.588 -> 13.010 (3.120x). Against my 2026-10-29 run on 099523f2cf, the four newest model commits moved ONLY striped, 4.713 -> 3.202, and left inter and inter-gather cycle-identical -- consistent with the L1/L2 and dismissible-load changes reaching the one kernel with data-dependent control flow and the heaviest memory traffic. Derived figures on this ISS: the missing runtime-indexed byte permute costs 18.3x (inter-gather against inter), and inter beats striped by 4.50x.

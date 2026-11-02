@@ -1,0 +1,4 @@
+bench	arch	opt	correct	cycles	cells	cycles_per_cell	cells_per_cycle	checksum	text_bytes	insns_static	bundles_static	simd_insns	cpu_model	csw_rev	gcc_rev	gem5_rev	cc_mtime
+striped	lvx-2	O2	ok	6412067	2002000	3.202	0.312	2265384000	14160	3111	1794	114	minor	9bb45ab	ddb90ae5f68	81c61f43f8	2026-11-02T15:23:26
+inter	lvx-2	O2	ok	1458767	2048000	0.712	1.403	374781626	2508	492	264	19	minor	9bb45ab	ddb90ae5f68	81c61f43f8	2026-11-02T15:23:26
+inter-gather	lvx-2	O2	ok	26644673	2048000	13.010	0.076	374781626	2868	561	301	19	minor	9bb45ab	ddb90ae5f68	81c61f43f8	2026-11-02T15:23:26
