@@ -156,41 +156,67 @@ if [ "$mode" = check ]; then
         [ "$age" -lt 10 ] && { warn="  <-- rebuilt in the last 10 min; a build may be in flight"; rc=1; }
         printf '  %-14s %s  (%sm ago)%s\n' installed "$(basename "$b")" "$age" "$warn"
     done
-    # Is the INSTALLED binary actually built from the revision we would stamp?
+    # Is the INSTALLED binary actually built from what is on disk now?
     #
     # This is the hole the other two checks leave. A clean tree and a binary
     # older than ten minutes say nothing about whether that binary was built
-    # from HEAD -- and the stamp records the TREE's SHA. So a sweep could run
-    # a gem5 built nine hours and four model commits ago while every row
+    # from the current sources -- and the stamp records the TREE's SHA. So a
+    # sweep could run a gem5 built before four model commits while every row
     # claimed the current lvx-gem5 revision. That is not a weak record, it is
-    # a confident false one, which is worse.
+    # a confident false one, and bin/lvx-perf-import cannot catch it: the
+    # trees really are clean, so there is nothing to refuse.
     #
-    # The test is not "binary newer than HEAD": a commit landing a minute
-    # after a build is the normal order of work, and a docs-only commit does
-    # not invalidate anything. It asks whether any commit SINCE the binary was
-    # built touched files the binary is built FROM. lvx-mds counts for both,
-    # because the gem5 backend and the GCC backend are generated from it.
-    stale_against() {   # $1 = binary, $2 = repo, $3.. = pathspecs
-        local bin=$1 repo=$2; shift 2
+    # The comparison is against FILE mtimes, not commit dates. An earlier
+    # version of this compared the binary against `git log --since', and that
+    # cannot tell "built before the change existed" from "built from the
+    # change before it was committed" -- build, measure, then commit is the
+    # ordinary order when a measurement gates the commit, and it made this
+    # check cry wolf on a compiler that already contained the change, 87
+    # seconds ahead of its own commit. File mtimes also catch what commit
+    # dates miss entirely: a binary built from edits that were never
+    # committed at all, which looks current and is not.
+    stale_against() {   # $1 = binary, $2 = repo, $3 = find paths (one string)
+        local bin=$1 repo=$2 paths=$3 newer
         [ -e "$CSW/$bin" ] || return 0
-        local bt n
-        bt=$(date -r "$CSW/$bin" +%s 2>/dev/null) || return 0
-        [ -e "$CSW/$repo/.git" ] || return 0
-        n=$(git -C "$CSW/$repo" log --since="@$bt" --name-only --format='' -- "$@" 2>/dev/null \
-            | grep -c . )
-        [ "${n:-0}" -eq 0 ] && return 0
-        printf '  %-14s %s is OLDER than %s sources: %s file(s) changed since it was built\n' \
-            STALE "$(basename "$bin")" "$repo" "$n"
-        git -C "$CSW/$repo" log --since="@$bt" --format='                   %h %s' -- "$@" 2>/dev/null \
-            | head -3
+        [ -d "$CSW/$repo" ] || return 0
+        # eval so the path list may carry globs; every list below is a literal
+        # in this file, never anything a caller supplies.
+        newer=$(cd "$CSW/$repo" 2>/dev/null \
+                && eval "find $paths -type f -newer '$CSW/$bin' 2>/dev/null" | head -4)
+        [ -z "$newer" ] && return 0
+        printf '  %-14s %s predates %s sources it is built from:\n' \
+            STALE "$(basename "$bin")" "$repo"
+        printf '%s\n' "$newer" | sed 's|^|                   |'
         return 1
     }
     for b in lvx-gem5/build/gem5-lvx-1.opt lvx-gem5/build/gem5-lvx-2.opt; do
-        stale_against "$b" lvx-gem5 src/ configs/ SConstruct site_scons/ || rc=1
-        stale_against "$b" lvx-mds . || rc=1
+        stale_against "$b" lvx-gem5 'src configs SConstruct site_scons' || rc=1
     done
-    stale_against lvx-toolchain/bin/lvx-mbr-gcc lvx-gcc/gcc gcc/ || rc=1
-    stale_against lvx-toolchain/bin/lvx-mbr-gcc lvx-mds . || rc=1
+    stale_against lvx-toolchain/bin/lvx-mbr-gcc lvx-gcc/gcc \
+        'gcc/config/lvx gcc/*.cc gcc/*.h' || rc=1
+
+    # Separately: is the GENERATED backend behind the description it comes
+    # from? lvx-gem5's src/arch/lvx/generated/* are gitignored MDS products,
+    # so they are invisible to every revision check, and lvx-mds moving means
+    # they must be regenerated rather than merely recompiled. Reported and not
+    # prescribed, because regenerating BE/GEM5 from anywhere but the top level
+    # silently prunes opcodes and changes ISS semantics -- so the cheap fix
+    # and the dangerous one differ, and a tool should not pick.
+    gen=$CSW/lvx-gem5/src/arch/lvx/generated
+    if [ -d "$gen" ] && [ -d "$CSW/lvx-mds" ]; then
+        newest_gen=$(find "$gen" -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
+        if [ -n "${newest_gen:-}" ]; then
+            mds_newer=$(cd "$CSW/lvx-mds" \
+                && find . -type f -newermt "@${newest_gen%.*}" \
+                   -not -path './.git/*' 2>/dev/null | head -3)
+            if [ -n "$mds_newer" ]; then
+                printf '  %-14s lvx-mds is newer than the generated backend:\n' REGEN
+                printf '%s\n' "$mds_newer" | sed 's|^|                   |'
+                echo   "                   regenerate from the lvx-mds TOP LEVEL only"
+                rc=1
+            fi
+        fi
+    fi
 
     # Self-check: --check and --tsv-row must agree about what dirty means.
     # They did not, once -- --check reported clean while --tsv-row appended
