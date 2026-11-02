@@ -83,7 +83,14 @@ rev_of() {
     local repo=$1 sha
     [ -n "$repo" ] && [ -e "$repo/.git" ] || { printf 'unknown'; return; }
     sha=$(git -C "$repo" rev-parse --short HEAD 2>/dev/null) || { printf 'unknown'; return; }
-    [ -n "$(git -C "$repo" status --porcelain 2>/dev/null | head -1)" ] && sha="$sha-dirty"
+    # TRACKED modifications only, matching --check exactly. These two must
+    # agree: --check said clean while this said -dirty, so a campaign passed
+    # the pre-flight gate and then stamped every row -dirty, which
+    # bin/lvx-stamp-check reads as a disagreement and the import refuses.
+    # The pre-flight check exists to stop a sweep wasting hours; two
+    # different definitions of dirty inside one script defeated it.
+    [ -n "$(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null | head -1)" ] \
+        && sha="$sha-dirty"
     printf '%s' "$sha"
 }
 
@@ -91,6 +98,14 @@ cc_mtime_of() {
     local cc=$1
     [ -x "$cc" ] || { printf 'unknown'; return; }
     date -r "$cc" +%Y-%m-%dT%H:%M:%S 2>/dev/null || printf 'unknown'
+}
+
+stamp_row_for_selfcheck() {
+    printf '%s\t%s\t%s\t%s' \
+        "$(rev_of "$CSW")" \
+        "$(rev_of "${CSW:+$CSW/lvx-gcc/gcc}")" \
+        "$(rev_of "${CSW:+$CSW/lvx-gem5}")" \
+        "$(cc_mtime_of "${CSW:+$CSW/lvx-toolchain/bin/lvx-mbr-gcc}")"
 }
 
 if [ "$mode" = check ]; then
@@ -141,6 +156,17 @@ if [ "$mode" = check ]; then
         [ "$age" -lt 10 ] && { warn="  <-- rebuilt in the last 10 min; a build may be in flight"; rc=1; }
         printf '  %-14s %s  (%sm ago)%s\n' installed "$(basename "$b")" "$age" "$warn"
     done
+    # Self-check: --check and --tsv-row must agree about what dirty means.
+    # They did not, once -- --check reported clean while --tsv-row appended
+    # -dirty from untracked files -- and a campaign passed this gate, swept,
+    # and would have had its import refused. A gate that can disagree with
+    # the thing it is gating is worse than no gate, because it is trusted.
+    if [ "$rc" = 0 ] && printf '%s' "$(stamp_row_for_selfcheck)" | grep -q -- '-dirty'; then
+        echo "=> TOOL BUG: --check says clean but --tsv-row stamps -dirty:"
+        echo "     $(stamp_row_for_selfcheck)"
+        echo "   Do not trust either answer until they agree."
+        exit 1
+    fi
     if [ "$rc" = 0 ]; then
         echo "=> provenance-clean: a sweep now can earn provenance=exact."
     else
