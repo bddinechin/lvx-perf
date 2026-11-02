@@ -175,22 +175,52 @@ if [ "$mode" = check ]; then
     # seconds ahead of its own commit. File mtimes also catch what commit
     # dates miss entirely: a binary built from edits that were never
     # committed at all, which looks current and is not.
-    stale_against() {   # $1 = binary, $2 = repo, $3 = find paths (one string)
-        local bin=$1 repo=$2 paths=$3 newer
+    stale_against() {   # $1 = binary, $2 = repo, $3 = paths, $4 = prune glob
+        local bin=$1 repo=$2 paths=$3 prune=${4:-} newer pexpr=
         [ -e "$CSW/$bin" ] || return 0
         [ -d "$CSW/$repo" ] || return 0
+        [ -n "$prune" ] && pexpr="-path '$prune' -prune -o"
         # eval so the path list may carry globs; every list below is a literal
-        # in this file, never anything a caller supplies.
+        # in this file, never anything a caller supplies. Paths come before
+        # predicates and the -o branch needs its own -print, or find rejects
+        # the expression -- which it did, loudly, the first time.
+        #
+        # Then keep only files git TRACKS. That is what makes this rule right
+        # rather than approximately right: everything the comparison must
+        # ignore is a build product, and git already knows which those are.
+        # A hardcoded prune of src/arch/lvx/generated/ missed
+        # src/arch/lvx/lvx_registers.h, an MDS product sitting outside that
+        # directory -- and of the 17 gem5 files newer than the binary here,
+        # ZERO are tracked. Asking git beats enumerating paths that will
+        # change.
         newer=$(cd "$CSW/$repo" 2>/dev/null \
-                && eval "find $paths -type f -newer '$CSW/$bin' 2>/dev/null" | head -4)
+                && eval "find $paths $pexpr -type f -newer '$CSW/$bin' -print 2>/dev/null" \
+                | tr '\n' '\0' | xargs -0 -r git ls-files -- 2>/dev/null \
+                | head -4)
         [ -z "$newer" ] && return 0
         printf '  %-14s %s predates %s sources it is built from:\n' \
             STALE "$(basename "$bin")" "$repo"
         printf '%s\n' "$newer" | sed 's|^|                   |'
         return 1
     }
+    # src/arch/lvx/generated/ is EXCLUDED from the per-binary comparison, and
+    # that is not a loosening -- it is the only way to get a right answer.
+    # The BE/GEM5 backend emits ONE core into that directory and gem5's src/
+    # is shared across variants, so a two-core build leaves generated/ holding
+    # whichever core came last. Comparing both binaries against it would mark
+    # the FIRST-built one stale permanently, as a direct consequence of a
+    # correct build, and this gate would never open again.
+    #
+    # The real dependency is lvx-mds, which generated/ is derived from, and
+    # whose mtimes do not move between the two core builds. So each binary is
+    # checked against the hand-written gem5 sources AND against the
+    # description. What neither can see is a generated/ that was never
+    # regenerated for THAT core -- no mtime can, since the directory holds one
+    # core at a time. build-cores.sh installing each core's generated/ in turn
+    # is what makes that sound, and no check here substitutes for it.
     for b in lvx-gem5/build/gem5-lvx-1.opt lvx-gem5/build/gem5-lvx-2.opt; do
         stale_against "$b" lvx-gem5 'src configs SConstruct site_scons' || rc=1
+        stale_against "$b" lvx-mds '.' || rc=1
     done
     stale_against lvx-toolchain/bin/lvx-mbr-gcc lvx-gcc/gcc \
         'gcc/config/lvx gcc/*.cc gcc/*.h' || rc=1
