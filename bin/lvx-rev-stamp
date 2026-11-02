@@ -156,6 +156,42 @@ if [ "$mode" = check ]; then
         [ "$age" -lt 10 ] && { warn="  <-- rebuilt in the last 10 min; a build may be in flight"; rc=1; }
         printf '  %-14s %s  (%sm ago)%s\n' installed "$(basename "$b")" "$age" "$warn"
     done
+    # Is the INSTALLED binary actually built from the revision we would stamp?
+    #
+    # This is the hole the other two checks leave. A clean tree and a binary
+    # older than ten minutes say nothing about whether that binary was built
+    # from HEAD -- and the stamp records the TREE's SHA. So a sweep could run
+    # a gem5 built nine hours and four model commits ago while every row
+    # claimed the current lvx-gem5 revision. That is not a weak record, it is
+    # a confident false one, which is worse.
+    #
+    # The test is not "binary newer than HEAD": a commit landing a minute
+    # after a build is the normal order of work, and a docs-only commit does
+    # not invalidate anything. It asks whether any commit SINCE the binary was
+    # built touched files the binary is built FROM. lvx-mds counts for both,
+    # because the gem5 backend and the GCC backend are generated from it.
+    stale_against() {   # $1 = binary, $2 = repo, $3.. = pathspecs
+        local bin=$1 repo=$2; shift 2
+        [ -e "$CSW/$bin" ] || return 0
+        local bt n
+        bt=$(date -r "$CSW/$bin" +%s 2>/dev/null) || return 0
+        [ -e "$CSW/$repo/.git" ] || return 0
+        n=$(git -C "$CSW/$repo" log --since="@$bt" --name-only --format='' -- "$@" 2>/dev/null \
+            | grep -c . )
+        [ "${n:-0}" -eq 0 ] && return 0
+        printf '  %-14s %s is OLDER than %s sources: %s file(s) changed since it was built\n' \
+            STALE "$(basename "$bin")" "$repo" "$n"
+        git -C "$CSW/$repo" log --since="@$bt" --format='                   %h %s' -- "$@" 2>/dev/null \
+            | head -3
+        return 1
+    }
+    for b in lvx-gem5/build/gem5-lvx-1.opt lvx-gem5/build/gem5-lvx-2.opt; do
+        stale_against "$b" lvx-gem5 src/ configs/ SConstruct site_scons/ || rc=1
+        stale_against "$b" lvx-mds . || rc=1
+    done
+    stale_against lvx-toolchain/bin/lvx-mbr-gcc lvx-gcc/gcc gcc/ || rc=1
+    stale_against lvx-toolchain/bin/lvx-mbr-gcc lvx-mds . || rc=1
+
     # Self-check: --check and --tsv-row must agree about what dirty means.
     # They did not, once -- --check reported clean while --tsv-row appended
     # -dirty from untracked files -- and a campaign passed this gate, swept,
@@ -170,9 +206,12 @@ if [ "$mode" = check ]; then
     if [ "$rc" = 0 ]; then
         echo "=> provenance-clean: a sweep now can earn provenance=exact."
     else
-        echo "=> NOT provenance-clean. Rows measured now will stamp \`-dirty' and"
-        echo "   bin/lvx-perf-import will refuse them. Fine for development; not"
-        echo "   for a series. Wait for the trees to settle, or accept it."
+        echo "=> NOT provenance-clean. Fine for development; not for a series."
+        echo "   A DIRTY tree makes the stamp say -dirty, which the import refuses."
+        echo "   A STALE binary is worse and the import cannot catch it: the trees"
+        echo "   are clean, so every row would record the current SHA while having"
+        echo "   run a binary built from an older one. Rebuild, or do not publish"
+        echo "   the rows as a series."
     fi
     exit $rc
 fi
