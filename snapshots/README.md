@@ -58,6 +58,51 @@ The MANIFEST pins `lvx-gem5`, which catches a *simulator* change. It does not
 pin `LVX_CPU`, which is what catches a *model* change, and the model change is
 the larger effect.
 
+## A compiler change is not automatically a discontinuity
+
+On 2026-11-02 lvx-gcc gained four anti-dependence fixes (`5838f2ba97d`, then
+`2a3209ef240` with debug probes stripped) whose author measured, over six
+suites and 9517 loops, pipelines with three or more stages going 107 -> 247,
+unresolved anti-dependence arcs 1108 -> 0, and kept arcs 6731 -> 829. The
+advice that came with it was to expect lower IIs, higher register counts and
+moved cycle counts across this series, and to treat `11a0b00` / `001b541` as
+the last comparable snapshot.
+
+That advice is wrong for the default configurations here, and the reason is
+worth stating because it will recur. Every function those commits touched --
+`lvx_cms_build_graph`, `lvx_cms_antidep_real_p`, `lvx_cms_lrange_of`,
+`lvx_cms_converge` -- is reached only through `lvx_cms_probe_loops`, and
+`lvx.cc` guards that with
+
+    if (optimize && (lvx_cms_probe || lvx_cms_codegen) ...)
+
+while `lvx.opt` declares `mcms-probe`, `mcms-codegen` and `mcms-pipeline` all
+`Init(0)`. No suite here passes any of them, so the modulo scheduler does not
+run in a default sweep and a change confined to it cannot move a number.
+
+**Verified by measurement, not by reading that code.** lvx-ssw re-run against
+`2a3209ef240` reproduces its `11a0b00` rows exactly -- cycles, cycles per
+cell, checksum AND static instruction count identical on all three
+benchmarks. Identical static counts are the stronger half: the emitted code is
+the same, so this is not a cycle count that happened to land twice.
+
+So the distinction a reader needs is between two things that look alike:
+
+| | status after 2026-11-03 |
+|---|---|
+| the snapshot's **provenance** | historical -- its pin names `ddb90ae5f68`, which is no longer the installed compiler |
+| the snapshot's **numbers** | still reproducible, for the default configurations, verified on ssw |
+
+A pin going stale does not invalidate the measurements it labels; it only
+stops them being re-derived from the recorded revisions. And the 107 -> 247
+discontinuity is real -- for CMS-enabled measurements, which is what
+`LVX_EXTRA_CFLAGS` carrying `-mcms-*` produces, and which nothing in this
+directory has ever taken.
+
+The general rule: ask what the change can reach before re-measuring six
+suites. Reading the gate costs a minute; a full campaign costs three and a
+half hours, and in this case would have reproduced the numbers it already had.
+
 ## What identifies a row differs per suite
 
 `bin/lvx-perf-trend` keys rows on different columns depending on the suite, and
