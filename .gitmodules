@@ -26,3 +26,5 @@
 [submodule "lvx-kernels"]
 	path = lvx-kernels
 	url = git@github.com:bddinechin/lvx-kernels.git
+	branch = main
+	update = merge
